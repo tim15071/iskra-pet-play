@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+  <meta name="theme-color" content="#56bbdb" />
+  <title>Моя Искра</title>
+  <style>
+    *{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#59b8d6;overscroll-behavior:none;-webkit-tap-highlight-color:transparent}
+    #canvas{display:block;width:100%;height:100dvh;outline:0;touch-action:none}
+    #loading{position:fixed;inset:0;background:radial-gradient(ellipse at 50% 35%,#d8f7fc,#70cde3 60%,#3a99c7);display:grid;place-content:center;justify-items:center;gap:18px;text-align:center;font-family:system-ui,sans-serif;color:#14527f;padding:28px;z-index:2}
+    #loading h1{margin:0;font-size:clamp(28px,5vw,54px);font-weight:900;color:white;text-shadow:0 3px 0 #3895ba}#loading p{margin:0;max-width:420px;font-weight:700;line-height:1.6}#spark{font-size:72px;color:#fff7ae;filter:drop-shadow(0 5px 0 #d8a338);animation:float 1.8s ease-in-out infinite}progress{accent-color:#ffcf4a;width:min(320px,70vw);height:20px}button{font:inherit;font-weight:800;color:#1a5880;padding:15px 26px;background:#fff6bd;border:3px solid #fff;border-radius:18px;box-shadow:0 5px 0 #51a2bb;cursor:pointer;touch-action:manipulation}button:active{transform:translateY(3px)}#retry{display:none}#note{font-size:12px;font-weight:600;color:#35728c}@keyframes float{50%{transform:translateY(-9px) rotate(5deg)}}@media(prefers-reduced-motion:reduce){#spark{animation:none}}
+  </style>
+  <link id="-gd-engine-icon" rel="icon" type="image/png" href="index.icon.png" />
+<link rel="apple-touch-icon" href="index.apple-touch-icon.png"/>
+<meta name="theme-color" content="#48b8da" />
+</head>
+<body>
+  <canvas id="canvas" tabindex="0" aria-label="Игровая комната Искры. Клавиши: F — еда, B — душ, G — игры, S — сон. Кнопки доступны касанием и мышью."></canvas>
+  <div id="loading" role="status" aria-live="polite"><div id="spark" aria-hidden="true">ϟ</div><h1>Моя Искра</h1><p id="message">Искра уже расправляет крылья…</p><progress id="progress" max="100"></progress><button id="retry" onclick="location.reload()">Попробовать ещё раз</button><span id="note">Первый запуск займёт немного времени</span></div>
+  <noscript>Для игры нужно включить JavaScript в браузере.</noscript>
+  <script src="index.js"></script>
+  <script>
+    const GODOT_CONFIG = {"args":[],"canvasResizePolicy":2,"emscriptenPoolSize":8,"ensureCrossOriginIsolationHeaders":true,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":7205084,"index.wasm":39514754},"focusCanvas":true,"gdextensionLibs":[],"godotPoolSize":4};
+    const GODOT_THREADS_ENABLED = false;
+    const engine = new Engine(GODOT_CONFIG);
+    let lastProgressAt = Date.now();
+    const slowDownload = setInterval(() => {
+      if (Date.now() - lastProgressAt < 45000) return;
+      document.getElementById('note').textContent = 'Если загрузка остановилась, проверь сеть и попробуй ещё раз';
+      document.getElementById('retry').style.display = 'block';
+    }, 5000);
+    const inform = (type, details = {}) => {
+      document.documentElement.dataset.gameState = type;
+      if (window.parent !== window) window.parent.postMessage({ type: `iskra:${type}`, ...details }, location.origin);
+    };
+    const fail = (error) => {
+      clearInterval(slowDownload);
+      console.error(error);
+      document.getElementById('message').textContent = 'Не удалось открыть игровую сцену. Проверь соединение и попробуй ещё раз. Для игры нужен браузер с WebGL 2.';
+      document.getElementById('progress').hidden = true;
+      document.getElementById('retry').style.display = 'block';
+      document.getElementById('note').textContent = 'На планшете открой ссылку в обычном браузере Safari или Chrome';
+      inform('error');
+    };
+    const missing = Engine.getMissingFeatures({ threads: GODOT_THREADS_ENABLED });
+    if (missing.length) fail(new Error(missing.join(', ')));
+    else engine.startGame({
+      canvas: document.getElementById('canvas'),
+      onProgress(current, total) {
+        lastProgressAt = Date.now();
+        const progress = document.getElementById('progress');
+        if (current > 0 && total > 0) { progress.max = total; progress.value = current; }
+        inform('loading', { progress: total ? Math.round(current / total * 100) : null });
+      },
+    }).then(() => {
+      clearInterval(slowDownload);
+      document.getElementById('loading').remove();
+      document.getElementById('canvas').focus();
+      inform('ready');
+    }).catch(fail);
+  </script>
+</body>
+</html>
+
