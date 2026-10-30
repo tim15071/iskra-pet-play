@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#fff7e0">
+<meta name="color-scheme" content="light">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23fff7e0'/%3E%3Cpath d='M32 6 39 25 58 32 39 39 32 58 25 39 6 32 25 25Z' fill='%23f4b83f'/%3E%3C/svg%3E">
+<title>Мастерская находок — Искра</title>
+<style>
+@font-face{font-family:Iskra;src:url("assets/game-font.ttf") format("truetype");font-weight:100 1000;font-display:swap}
+@font-face{font-family:Nunito;src:url("assets/game-font.ttf") format("truetype");font-weight:100 1000;font-display:swap}
+*{box-sizing:border-box}
+html,body{margin:0;width:100%;height:100%;overflow:hidden;overscroll-behavior:none;background:#fff7e0;color:#195961}
+html{-webkit-text-size-adjust:100%;-webkit-tap-highlight-color:transparent}
+body{font-family:Iskra,"Trebuchet MS",sans-serif}
+#stage{position:fixed;inset:0;width:100%;height:100%;height:100dvh;display:grid;place-items:center;padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)}
+#c{display:block;width:100%;height:100%;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-touch-callout:none;outline:none}
+html.keyboard-nav #c:focus-visible{outline:3px solid #14756f;outline-offset:-4px}
+.overlay{position:absolute;inset:0;display:grid;place-content:center;justify-items:center;gap:14px;padding:calc(28px + env(safe-area-inset-top,0px)) 28px calc(28px + env(safe-area-inset-bottom,0px));text-align:center;background:#fff7e0;z-index:2}
+.overlay[hidden]{display:none}
+.mark{width:72px;height:72px;display:grid;place-items:center;border-radius:24px;background:#d8efda;color:#1c6965;font-size:38px;font-weight:900}
+h1{margin:4px 0 0;font-size:clamp(25px,4vw,38px);font-weight:900;line-height:1.15}
+.overlay p{max-width:460px;margin:0;font-size:18px;line-height:1.5;color:#50756b}
+button{min-height:52px;padding:13px 28px;border:2px solid #d7a143;border-radius:18px;background:#ffd66c;color:#684316;font:850 18px Iskra,"Trebuchet MS",sans-serif;box-shadow:0 4px 0 #bc8733;touch-action:manipulation;user-select:none;-webkit-user-select:none;cursor:pointer}
+button:active{transform:translateY(2px);box-shadow:0 2px 0 #bc8733}
+button:focus-visible{outline:3px solid #14756f;outline-offset:5px}
+#dev{display:none;position:absolute;left:12px;bottom:12px;max-width:calc(100% - 24px);padding:6px 10px;border-radius:9px;background:#154f48e8;color:#fff;font:12px ui-monospace,monospace;white-space:pre-wrap;pointer-events:none;z-index:3}
+#dev[data-enabled]{display:block}
+#notice{position:absolute;left:50%;top:calc(16px + env(safe-area-inset-top,0px));transform:translateX(-50%);max-width:calc(100% - 40px);padding:12px 18px;border-radius:16px;background:#fff7e0f5;color:#195961;box-shadow:0 4px 18px #143d3a33;font:800 16px Iskra,"Trebuchet MS",sans-serif;text-align:center;pointer-events:none;z-index:4}
+#notice[hidden]{display:none}
+.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+@media(hover:hover) and (pointer:fine){button:hover{background:#ffdf87}}
+</style>
+</head>
+<body>
+<main id="stage" aria-label="Игра «Мастерская находок»">
+<canvas id="c" tabindex="0" role="application" aria-label="Мастерская Искры. Найди игрушки из списка внизу." aria-describedby="instructions" aria-busy="true">Для игры нужен браузер с поддержкой WebGL2.</canvas>
+<p id="instructions" class="sr-only">Найди в комнате игрушки с нижней панели. Коснись образца, чтобы выбрать предмет для подсказки. Все предметы видны на экране. Enter — подсказка, стрелки на клавиатуре — выбрать образец, F — полноэкранный режим, R — начать уровень заново, Escape — отменить касание.</p>
+<div id="loading" class="overlay" role="status" aria-live="polite"><div class="mark" aria-hidden="true">✦</div><h1>Открываем мастерскую</h1><p>Искра готовит игрушки…</p></div>
+<div id="error" class="overlay" role="alert" hidden><div class="mark" aria-hidden="true">!</div><h1>Мастерская пока не открылась</h1><p id="error-message">Попробуй открыть её ещё раз.</p><button id="retry" type="button">Попробовать ещё раз</button></div>
+<div id="progress-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+<div id="notice" role="status" aria-live="polite" hidden></div>
+<div id="dev" aria-hidden="true"></div>
+</main>
+<script>window.__STATIC__ = 1;</script>
+<script>
+'use strict';
+const STATIC=!!window.__STATIC__,VERSION=Date.now();
+const query=new URLSearchParams(location.search),renderMode=query.has('render')&&query.get('render')!=='0';
+addEventListener('keydown',(event)=>{if(event.key==='Tab')document.documentElement.classList.add('keyboard-nav');});
+addEventListener('pointerdown',()=>document.documentElement.classList.remove('keyboard-nav'),{passive:true});
+const debug=!STATIC&&query.has('dev'),canvas=document.getElementById('c');
+const loading=document.getElementById('loading'),errorPanel=document.getElementById('error');
+const statusLine=document.getElementById('progress-status'),dev=document.getElementById('dev');
+const clamp=(n,a,b)=>Math.max(a,Math.min(b,n));
+function measureViewport(){
+  const stage=document.getElementById('stage'),style=getComputedStyle(stage),pixels=(value)=>parseFloat(value)||0;
+  const width=Math.max(1,stage.clientWidth-pixels(style.paddingLeft)-pixels(style.paddingRight));
+  const height=Math.max(1,stage.clientHeight-pixels(style.paddingTop)-pixels(style.paddingBottom));
+  return{width,height,ratio:clamp(height/width,.4,3)};
+}
+function fitCanvas(view,bounds=measureViewport()){
+  const ratio=view.H/view.W,width=Math.min(bounds.width,bounds.height/ratio);
+  canvas.style.width=width+'px';canvas.style.height=width*ratio+'px';
+}
+const sourceURL=(name)=>name+(STATIC?'':'?v='+VERSION);
+window.__ready=false;window.__renderErr=null;window.__fps=0;window.__play=null;
+let saveProgress=()=>{},watcherStarted=false,failed=false;
+let noticeTimer=0;
+function showNotice(message){
+  const notice=document.getElementById('notice');clearTimeout(noticeTimer);
+  notice.textContent=message;notice.hidden=false;noticeTimer=setTimeout(()=>{notice.hidden=true;},4000);
+}
+window.toggleGameFullscreen=async()=>{
+  try{
+    if(document.fullscreenElement||document.webkitFullscreenElement){
+      const exit=document.exitFullscreen||document.webkitExitFullscreen;
+      if(!exit){showNotice('Выйти из полного экрана можно кнопкой браузера.');return false;}
+      await exit.call(document);
+    }else{
+      const target=document.documentElement,enter=target.requestFullscreen||target.webkitRequestFullscreen;
+      if(!enter){showNotice('В этом браузере полный экран недоступен.');return false;}
+      await enter.call(target);
+    }
+    return true;
+  }catch(_){showNotice('Не удалось включить полный экран. Можно продолжить играть.');return false;}
+};
+const WATCH=['index.html','scene.js','sim.js','lib.js','gl.js','assets.js','sizes.js','iskra-rig.js','audio.js'];
+function showError(error){
+  if(!window.__renderErr){window.__renderErr=error;console.error(error);}
+  failed=true;loading.hidden=true;errorPanel.hidden=false;canvas.setAttribute('aria-busy','false');
+  document.getElementById('error-message').textContent=/WebGL2/i.test(error.message||'')
+    ?'Браузеру нужна поддержка WebGL2. Попробуй открыть игру в другом браузере.'
+    :'Не получилось загрузить мастерскую. Проверь соединение и попробуй ещё раз.';
+}
+document.getElementById('retry').addEventListener('click',()=>{saveProgress();location.reload();});
+function loadScript(name){
+  return new Promise((resolve,reject)=>{
+    const script=document.createElement('script'),url=new URL(sourceURL(name),location.href).href;
+    let scriptError=null;
+    const onError=(event)=>{if(event.filename&&new URL(event.filename,location.href).href===url)scriptError=event.error||new Error(event.message);};
+    const done=()=>window.removeEventListener('error',onError);
+    window.addEventListener('error',onError);script.src=url;
+    script.onload=()=>{done();scriptError?reject(scriptError):resolve();};
+    script.onerror=()=>{done();reject(new Error('Не загружен модуль '+name));};
+    document.head.appendChild(script);
+  });
+}
+async function loadOptionalScript(name){
+  let response=await fetch(sourceURL(name),{method:'HEAD',cache:'no-store'});
+  if(response.status===405)response=await fetch(sourceURL(name),{cache:'no-store'});
+  if(response.status===404)return false;
+  if(!response.ok)throw new Error('Не удалось проверить модуль '+name+' ('+response.status+')');
+  await loadScript(name);WATCH.push(name);return true;
+}
+function watchSources(){
+  if(STATIC||renderMode||watcherStarted)return;
+  watcherStarted=true;const stamps=new Map();
+  const poll=async()=>{
+    let changed=false;
+    await Promise.all(WATCH.map(async(name)=>{
+      try{
+        const response=await fetch(name+'?poll='+Date.now(),{method:'HEAD',cache:'no-store'});
+        if(!response.ok)return;
+        const stamp=[response.headers.get('last-modified'),response.headers.get('etag'),response.headers.get('content-length')].join('|');
+        if(stamps.has(name)&&stamps.get(name)!==stamp)changed=true;
+        stamps.set(name,stamp);
+      }catch(_){/* A preview-server disconnect does not alter progress. */}
+    }));
+    if(changed){saveProgress();location.reload();return;}
+    setTimeout(poll,1000);
+  };
+  poll();
+}
+(async()=>{
+  for(const name of ['assets.js','sizes.js','gl.js','lib.js','sim.js','iskra-rig.js'])await loadScript(name);
+  await loadOptionalScript('rig-config.js');
+  for(const name of ['scene.js','audio.js'])await loadScript(name);
+  const bounds=measureViewport(),W=bounds.height>bounds.width?1080:1920;
+  const view=window.ISKRA_VIEW=renderMode?{...SIM.VIEW}:{W,H:Math.round(W*bounds.ratio)};
+  fitCanvas(view,bounds);
+  G.init(canvas,view.W,view.H);
+  const repeated=new Set(SCENE.REPEAT||[]),near=(name)=>SCENE.NEAREST===true||(SCENE.NEAREST||[]).includes(name);
+  await Promise.all(Object.keys(ASSETS).map((name)=>G.load(name,sourceURL('assets/'+name+'.png'),{repeat:repeated.has(name),nearest:near(name)})));
+  await document.fonts.load('850 32px "Iskra"');
+  await document.fonts.load('900 32px "Nunito"');
+  SCENE.programs();window.__duration=SIM.L;
+  window.__renderAt=(time)=>{try{SCENE.render(time);return canvas.toDataURL('image/png');}catch(error){showError(error);throw error;}};
+  if(renderMode){SCENE.state=null;SCENE.render(0);window.__ready=true;loading.hidden=true;canvas.setAttribute('aria-busy','false');return;}
+  let play=SIM.spawn(0),savedPayload='',savedRevision=-1,lastHint='';
+  try{const raw=localStorage.getItem(SIM.SAVE_KEY);if(raw)play=SIM.restoreSave(raw,0);}catch(_){}
+  SCENE.state=play;window.__play=play;
+  saveProgress=()=>{try{const payload=SIM.encodeSave(play);if(payload!==savedPayload){localStorage.setItem(SIM.SAVE_KEY,payload);savedPayload=payload;}}catch(_){}};
+  const announce=()=>{statusLine.textContent='Уровень '+(play.level+1)+'. Найдено '+play.count+' из '+play.total+(play.mode==='win'?'. Все игрушки найдены!':'');};
+  const keys=Object.create(null),taps=[],pointer={x:play.x,y:play.y};
+  let gesture=null,acc=0,last=performance.now(),fpsElapsed=0,fpsFrames=0,fps=60,resizeTimer=0;
+  const toView=(event)=>{const r=canvas.getBoundingClientRect();return{x:(event.clientX-r.left)/r.width*view.W,y:(event.clientY-r.top)/r.height*view.H};};
+  const mappedPointer=(event)=>{const point=toView(event);return{point,mapped:SCENE.mapPointer(point.x,point.y)};};
+  const rememberPointer=(mapped)=>{pointer.room=!!mapped.room;if(Number.isFinite(mapped.px)&&Number.isFinite(mapped.py)){pointer.x=mapped.px;pointer.y=mapped.py;}else{pointer.x=SIM.VIEW.W/2;pointer.y=0;}};
+  const setCamera=(camera)=>{const a=SCENE.layout();SCENE.cameraX=clamp(camera,a.camMin,a.camMax);};
+  const releaseCapture=(id)=>{try{if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}catch(_){}};
+  const cancelGesture=()=>{if(gesture){const id=gesture.id;gesture=null;releaseCapture(id);}};
+  const clearInput=()=>{Object.keys(keys).forEach((key)=>delete keys[key]);taps.length=0;cancelGesture();};
+  const updateGesture=(event)=>{
+    if(!gesture||gesture.id!==event.pointerId)return;
+    const dx=event.clientX-gesture.x,dy=event.clientY-gesture.y;
+    gesture.distance=Math.max(gesture.distance,Math.hypot(dx,dy));
+    if(gesture.distance>10)gesture.dragged=true;
+    if(gesture.dragged&&gesture.room&&gesture.portrait&&(gesture.panning||Math.abs(dx)>Math.abs(dy))){
+      gesture.panning=true;const a=SCENE.layout(),r=canvas.getBoundingClientRect();
+      setCamera(gesture.camera-dx/r.width*view.W/a.scale);
+    }
+  };
+  canvas.addEventListener('pointerdown',(event)=>{
+    if(event.button!==0&&event.pointerType!=='touch')return;
+    if(gesture){cancelGesture();return;}
+    const{mapped}=mappedPointer(event),a=SCENE.layout();rememberPointer(mapped);
+    gesture={id:event.pointerId,x:event.clientX,y:event.clientY,distance:0,dragged:false,panning:false,room:!!mapped.room,portrait:a.portrait,camera:a.camera};
+    canvas.focus({preventScroll:true});try{canvas.setPointerCapture(event.pointerId);}catch(_){}
+  });
+  canvas.addEventListener('pointermove',(event)=>{updateGesture(event);rememberPointer(mappedPointer(event).mapped);});
+  canvas.addEventListener('pointerup',(event)=>{
+    if(!gesture||gesture.id!==event.pointerId)return;
+    updateGesture(event);const finished=gesture;gesture=null;releaseCapture(event.pointerId);
+    if(finished.dragged)return;
+    const{mapped}=mappedPointer(event);rememberPointer(mapped);
+    if(mapped.fullscreen){window.toggleGameFullscreen();return;}
+    if(mapped.pan){setCamera(SCENE.layout().camera+mapped.pan*400);return;}
+    if(!mapped.blocked&&Number.isFinite(mapped.px)&&Number.isFinite(mapped.py))taps.push({x:mapped.px,y:mapped.py,room:!!mapped.room});
+  });
+  canvas.addEventListener('pointercancel',(event)=>{if(gesture&&gesture.id===event.pointerId)cancelGesture();});
+  canvas.addEventListener('lostpointercapture',(event)=>{if(gesture&&gesture.id===event.pointerId)gesture=null;});
+  canvas.addEventListener('contextmenu',(event)=>event.preventDefault());
+  const handledKeys=new Set(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','KeyA','KeyD','KeyW','KeyS','Enter','Space','KeyX','KeyJ']);
+  addEventListener('keydown',(event)=>{
+    if(event.ctrlKey||event.metaKey||event.altKey||event.target?.closest?.('button,input,textarea,select'))return;
+    if(event.code==='KeyF'){event.preventDefault();if(!event.repeat)window.toggleGameFullscreen();return;}
+    if(event.code==='KeyR'){event.preventDefault();if(!event.repeat){clearInput();SIM.startLevel(play,play.level,true);SCENE.cameraX=960;saveProgress();}return;}
+    if(event.code==='Escape'){event.preventDefault();clearInput();return;}
+    if(handledKeys.has(event.code)){keys[event.code]=true;event.preventDefault();}
+  });
+  addEventListener('keyup',(event)=>{delete keys[event.code];});
+  addEventListener('blur',()=>{clearInput();saveProgress();});
+  addEventListener('pagehide',saveProgress);
+  document.addEventListener('visibilitychange',()=>{if(document.hidden){clearInput();saveProgress();}last=performance.now();acc=0;});
+  setInterval(saveProgress,1000);
+  const resizeRenderer=(bounds)=>{
+    const width=bounds.height>bounds.width?1080:1920,height=Math.round(width*bounds.ratio);
+    if(width===view.W&&height===view.H){fitCanvas(view,bounds);return;}
+    saveProgress();clearInput();
+    const gl=G.gl,oldTargets=[...new Set(Object.values(LIB.T||{}))];
+    const assetTextures=new Set(Object.keys(ASSETS).map(name=>G.tex(name).t));
+    let oldGlyph=null;try{oldGlyph=G.tex('glyphs').t;}catch(_){}
+    // Resizing the drawing buffer preserves the WebGL context and its asset
+    // textures. Rebuild only screen-sized render targets and the HUD atlas.
+    view.W=width;view.H=height;canvas.width=width;canvas.height=height;G.W=width;G.H=height;
+    fitCanvas(view,bounds);SCENE.programs();
+    const currentTargets=Object.values(LIB.T||{}),currentFrames=new Set(currentTargets.map(target=>target.fb));
+    const currentTextures=new Set([...assetTextures,...currentTargets.map(target=>target.t)]);
+    try{currentTextures.add(G.tex('glyphs').t);}catch(_){}
+    const obsoleteTextures=new Set(oldTargets.map(target=>target.t).filter(Boolean));if(oldGlyph)obsoleteTextures.add(oldGlyph);
+    for(const target of oldTargets)if(target.fb&&!currentFrames.has(target.fb))gl.deleteFramebuffer(target.fb);
+    for(const texture of obsoleteTextures)if(!currentTextures.has(texture))gl.deleteTexture(texture);
+    // Shader programs belong to G.program's persistent cache and remain valid.
+    SCENE.state=play;SCENE.render(play.wt0+play.t);last=performance.now();acc=0;
+  };
+  const onResize=()=>{
+    clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{
+      try{resizeRenderer(measureViewport());}catch(error){saveProgress();showError(error);}
+    },220);
+  };
+  addEventListener('resize',onResize);addEventListener('orientationchange',onResize);
+  document.addEventListener('fullscreenchange',onResize);document.addEventListener('webkitfullscreenchange',onResize);
+  const centreNewHint=()=>{
+    const hints=(play.ev||[]).filter((event)=>event.k==='hint'),hint=hints[hints.length-1];
+    if(!hint)return;const token=[play.level,play.hintUses,hint.t,hint.id].join(':');
+    if(token===lastHint)return;lastHint=token;
+    const item=SIM.items(play).find((object)=>object.id===hint.id);if(item)setCamera(item.x);
+  };
+  function frame(now){
+    if(failed)return;
+    try{
+    const wall=Math.max(0,Math.min(.1,(now-last)/1000));last=now;
+    fpsElapsed+=wall;fpsFrames++;if(fpsElapsed>.5){fps=fpsFrames/fpsElapsed;fpsElapsed=0;fpsFrames=0;window.__fps=fps;}
+    if(!document.hidden)acc+=wall;
+    while(acc>=SIM.DT){
+      const tap=taps.shift(),input={left:keys.ArrowLeft||keys.KeyA,right:keys.ArrowRight||keys.KeyD,up:keys.ArrowUp||keys.KeyW,down:keys.ArrowDown||keys.KeyS,
+        act:keys.Enter||keys.KeyX||keys.KeyJ,jump:keys.Space,px:tap?tap.x:pointer.x,py:tap?tap.y:pointer.y,room:tap?!!tap.room:!!pointer.room,press:false,tap:!!tap};
+      SIM.step(play,input);centreNewHint();acc-=SIM.DT;
+    }
+    SCENE.state=play;window.__play=play;
+    if(play.revision!==savedRevision){savedRevision=play.revision;saveProgress();announce();}
+    SCENE.render(play.wt0+play.t);
+    if(debug)dev.textContent='ИГРА  '+fps.toFixed(0)+' fps  ·  '+view.W+' × '+view.H+'  ·  камера '+Math.round(SCENE.layout().camera);
+    }catch(error){saveProgress();showError(error);return;}
+    requestAnimationFrame(frame);
+  }
+  if(debug)dev.setAttribute('data-enabled','');
+  announce();SCENE.render(play.wt0+play.t);window.__ready=true;
+  canvas.setAttribute('aria-busy','false');loading.hidden=true;
+  requestAnimationFrame(frame);watchSources();onResize();
+})().catch((error)=>{showError(error);watchSources();});
+</script>
+</body>
+</html>
