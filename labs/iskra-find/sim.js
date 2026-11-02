@@ -4,7 +4,7 @@
   'use strict';
   const DT = 1 / 120, L = 25, VIEW = { W: 1920, H: 1080 }, WORLD = { W: 1920, H: 1440 };
   // Keep the original storage key: each schema extends the same local journey.
-  const SAVE_KEY = 'iskra-ref2game-find-v1', VERSION = 4;
+  const SAVE_KEY = 'iskra-ref2game-find-v1', VERSION = 5;
   const HINT_COOLDOWN = 8, HINT_REVEAL = 3.2, TAP_SLOP = 22;
   const FRIEND_THRESHOLDS = [0,60,180], CARE_COOLDOWN = 10;
   const CARE_DURATIONS = {play:2.2,rest:3,feed:2.4};
@@ -94,6 +94,15 @@
     });
     LEVELS.push(level(i+7,gardenNames[i],'Найди '+gardenTargets[i].length+' сокровищ сада',gardenTargets[i],rows,'garden'));
   }
+  // Cache identity belongs to the authored level, not to responsive screen
+  // positions. Only a wanted object can be hidden; one reveal never finds it.
+  const CACHE_FACES = [[2,10],[6,9,11],[1,6,10,11],[5,7,11],[2,8,10,11],[1,5,9,10],
+    [13,16],[15,18,22],[13,19,21,23],[16,18,22],[14,17,19,23],[13,15,20,21]];
+  LEVELS.forEach((def,i)=>{
+    def.searchStyle=[2,4,7,9,11].includes(i)?'silhouette':'classic';
+    def.caches=CACHE_FACES[i].map((face,n)=>({id:'l'+def.id+'-cache-'+FACE_IDS[face],face,
+      itemId:def.items.find(item=>item.face===face).id,kind:def.room==='garden'?(n%2?'flowerbox':'leaves'):(n%2?'basket':'books')}));
+  });
   const TROPHIES = [
     {id:'rocket',name:'Ракета мечты',face:0,level:1},
     {id:'duck',name:'Солнечная уточка',face:1,level:2},
@@ -124,6 +133,21 @@
   const has = (o,k) => Object.prototype.hasOwnProperty.call(o,k);
   const isFound = (S,item) => has(S.found, typeof item === 'string' ? item : item.id);
   const foundCount = (S) => items(S).filter((o) => o.target && isFound(S,o)).length;
+  const cacheView = (S,cache) => Object.assign({},cache,{open:S.openedCaches[cache.id]===true||isFound(S,cache.itemId),found:isFound(S,cache.itemId)});
+  const caches = (S) => layout(S).caches.map(cache=>cacheView(S,cache));
+  function cacheFor(S,item) {
+    const id=typeof item==='string'?item:item&&item.id,cache=layout(S).caches.find(cache=>cache.itemId===id);
+    return cache?cacheView(S,cache):null;
+  }
+  const itemHidden = (S,item) => {const cache=cacheFor(S,item);return !!cache&&!cache.open&&!cache.found;};
+  function openCache(S,id,options={}) {
+    if(S.mode!=='play'||typeof id!=='string')return false;
+    const cache=layout(S).caches.find(cache=>cache.id===id);
+    if(!cache||S.openedCaches[id]===true||isFound(S,cache.itemId))return false;
+    const item=items(S).find(item=>item.id===cache.itemId);
+    S.openedCaches[id]=true;S.revision++;S.reaction.curiousV+=4;
+    event(S,'cache',{id:cache.id,face:cache.face,itemId:cache.itemId,x:item.x,y:item.y,kind:cache.kind,viaHint:options&&options.viaHint===true});return true;
+  }
   const bounded = (value,lo,hi,fallback=lo) => typeof value==='number'&&Number.isFinite(value)?clamp(value,lo,hi):fallback;
   const integer = (value,lo,hi,fallback=lo) => Number.isInteger(value)?clamp(value,lo,hi):fallback;
   const newPet = () => ({xp:0,food:70,fun:65,rest:65,clock:0,readyAt:{play:0,rest:0,feed:0}});
@@ -229,15 +253,21 @@
     // A real last find awards immediately. A complete off-screen attempt is
     // inconsistent input and must not create an unfinishable board or a prize.
     if(found.length===valid.size)return null;
-    return {found,hintRemaining:typeof data.hintRemaining==='number'&&Number.isFinite(data.hintRemaining)?clamp(data.hintRemaining,0,HINT_COOLDOWN):0,
+    return {found,openedCaches:cleanOpenedCaches(number,data.openedCaches,found),hintRemaining:typeof data.hintRemaining==='number'&&Number.isFinite(data.hintRemaining)?clamp(data.hintRemaining,0,HINT_COOLDOWN):0,
       hintUses:Number.isInteger(data.hintUses)?clamp(data.hintUses,0,99999):0};
   }
+  function cleanOpenedCaches(number,data,found=[]) {
+    const candidates=Array.isArray(data)?data: data&&typeof data==='object'&&!Array.isArray(data)?Object.keys(data).filter(id=>data[id]===true):[];
+    const wanted=new Set(candidates.slice(0,12)),foundIds=new Set(found);
+    return LEVELS[number].caches.filter(cache=>wanted.has(cache.id)||foundIds.has(cache.itemId)).map(cache=>cache.id);
+  }
   function attemptSnapshot(S) {
-    return {found:Object.keys(S.found),hintRemaining:hintRemaining(S),hintUses:S.hintUses};
+    return {found:Object.keys(S.found),openedCaches:cleanOpenedCaches(S.level,S.openedCaches,Object.keys(S.found)),hintRemaining:hintRemaining(S),hintUses:S.hintUses};
   }
   function applyAttempt(S,data) {
     const attempt=cleanAttempt(S.level,data);if(!attempt)return;
     S.found=Object.fromEntries(attempt.found.map((id)=>[id,-1]));S.count=foundCount(S);
+    S.openedCaches=Object.fromEntries(attempt.openedCaches.map(id=>[id,true]));
     S.hint.readyAt=S.t+attempt.hintRemaining;S.hintUses=attempt.hintUses;
     const next=nextMissing(S);if(next)S.focus=next.face;
   }
@@ -252,7 +282,7 @@
   }
   function create(number=0) {
     const n = clamp(number | 0,0,LEVELS.length-1), def = LEVELS[n];
-    return { schema: VERSION, t: 0, steps: 0, wt0: 0, level: n, mode: 'play', found: {}, count: 0, total: def.targets.length,
+    return { schema: VERSION, t: 0, steps: 0, wt0: 0, level: n, mode: 'play', found: {}, openedCaches:{},count: 0, total: def.targets.length,
       focus: def.targets[0], hint: { id: '', until: -1, readyAt: 0 }, hintUses: 0, ev: [],
       x: VIEW.W/2, y: VIEW.H/2, press: 0, pointer: null, hoverId: '', hov: Object.fromEntries(def.items.map((o)=>[o.id,[0,0]])),
       progress: { completed: LEVELS.map(()=>false),claimed:LEVELS.map(()=>false),selected:null,attempts:{} },pet:newPet(),dailyState:newDaily(),careAction:null,reward:null,revision: 0, wonAt: -1, lastFound: '', lastMiss: '',
@@ -287,13 +317,14 @@
   function useHint(S) {
     if (S.mode!=='play' || hintRemaining(S)>0) return false;
     const o=nextMissing(S); if (!o) return false;
+    const cache=cacheFor(S,o);if(cache&&!cache.open)openCache(S,cache.id,{viaHint:true});
     const perks=friendship(S);
     S.focus=o.face; S.hint={id:o.id,until:S.t+perks.reveal,readyAt:S.t+perks.cooldown}; S.hintUses++; S.revision++;
     S.reaction.curiousV+=4;
     event(S,'hint',{id:o.id,face:o.face,x:o.x,y:o.y}); return true;
   }
   function find(S,o) {
-    if (S.mode!=='play' || !o || !o.target || isFound(S,o)) return false;
+    if (S.mode!=='play' || !o || !o.target || isFound(S,o) || itemHidden(S,o)) return false;
     S.found[o.id]=S.t; S.count=foundCount(S); S.lastFound=o.id; S.revision++; S.reaction.joyV+=7;gainXP(S,1);countDaily(S,'find8');
     // Only confirmed active play uses a little food/rest; returning after days
     // never changes needs, and low needs never block the search or hurt Iskra.
@@ -326,6 +357,7 @@
     // Header and clue tray never pass a tap through to room props.
     if(!room && (y<144 || y>884)) return false;
     const o=hitTest(S,x,y);
+    const cache=cacheFor(S,o);if(cache&&!cache.open)return openCache(S,cache.id);
     if(find(S,o)) return true;
     if(o) { S.lastMiss=o.id; S.reaction.curiousV+=3; }
     event(S,o?'distractor':'tap',{id:o?o.id:'',x,y});
@@ -376,14 +408,14 @@
   }
   // Local workshop collection only; the main Godot profile is separate.
   function encodeSave(S) {
-    return JSON.stringify({version:VERSION,level:S.level,found:Object.keys(S.found),completed:S.progress.completed,claimed:S.progress.claimed,selected:S.progress.selected,attempts:savedAttempts(S),
+    return JSON.stringify({version:VERSION,level:S.level,found:Object.keys(S.found),openedCaches:cleanOpenedCaches(S.level,S.openedCaches,Object.keys(S.found)),completed:S.progress.completed,claimed:S.progress.claimed,selected:S.progress.selected,attempts:savedAttempts(S),
       hintRemaining:hintRemaining(S),hintUses:S.hintUses,pet:{xp:S.pet.xp,food:S.pet.food,fun:S.pet.fun,rest:S.pet.rest,
         cooldowns:Object.fromEntries(Object.keys(CARE_DURATIONS).map(kind=>[kind,Math.max(0,S.pet.readyAt[kind]-S.pet.clock)]))},daily:cleanDaily(S.dailyState)});
   }
   function restoreSave(raw,worldT=0) {
     let data;
     try { data=typeof raw==='string'?JSON.parse(raw):raw; } catch (_) {return spawn(worldT);}
-    if(!data || typeof data!=='object' || ![1,2,3,VERSION].includes(data.version))return spawn(worldT);
+    if(!data || typeof data!=='object' || ![1,2,3,4,VERSION].includes(data.version))return spawn(worldT);
     const oldLimit=data.version===1?3:data.version===2?6:LEVELS.length;
     if(!Number.isInteger(data.level)||data.level<0||data.level>=oldLimit)return spawn(worldT);
     const completed=LEVELS.map((_,i)=>i<oldLimit&&Array.isArray(data.completed)&&data.completed[i]===true);
@@ -397,19 +429,21 @@
     S.progress.claimed=completed.slice();
     const attempts=data.version>=2&&data.attempts&&typeof data.attempts==='object'&&!Array.isArray(data.attempts)?data.attempts:{};
     for(let i=0;i<oldLimit;i++)if(!completed[i]&&levelUnlocked(S,i)&&has(attempts,String(i))) {
-      const attempt=cleanAttempt(i,attempts[i]);if(attempt)S.progress.attempts[i]=attempt;
+      const input=attempts[i],legacy=data.version<VERSION&&input&&typeof input==='object'&&!Array.isArray(input)?Object.assign({},input,{openedCaches:[]}):input;
+      const attempt=cleanAttempt(i,legacy);if(attempt)S.progress.attempts[i]=attempt;
     }
     const valid=new Set(items(S).filter((o)=>o.target).map((o)=>o.id));
     for(const id of number===data.level&&Array.isArray(data.found)?data.found:[]) if(typeof id==='string'&&valid.has(id))S.found[id]=-1;
     S.count=foundCount(S);
-    const pet=data.version===VERSION&&data.pet&&typeof data.pet==='object'&&!Array.isArray(data.pet)?data.pet:null;
+    S.openedCaches=Object.fromEntries(cleanOpenedCaches(S.level,number===data.level&&data.version===VERSION?data.openedCaches:[],Object.keys(S.found)).map(id=>[id,true]));
+    const pet=data.version>=4&&data.pet&&typeof data.pet==='object'&&!Array.isArray(data.pet)?data.pet:null;
     if(pet){
       S.pet.xp=integer(pet.xp,0,1000000);for(const need of ['food','fun','rest'])S.pet[need]=bounded(pet[need],0,100,newPet()[need]);
       for(const kind of Object.keys(CARE_DURATIONS))S.pet.readyAt[kind]=bounded(pet.cooldowns&&pet.cooldowns[kind],0,CARE_COOLDOWN);
-    }else if(data.version<VERSION){
+    }else if(data.version<4){
       S.pet.xp=completed.reduce((sum,done,i)=>sum+(done?LEVELS[i].targets.length:0),0)+(completed[number]?0:S.count);
     }
-    if(data.version===VERSION)S.dailyState=cleanDaily(data.daily);
+    if(data.version>=4)S.dailyState=cleanDaily(data.daily);
     if(S.count===S.total) {S.mode='win';S.wonAt=-1;award(S);S.reward.first=false;}
     S.progress.selected=typeof data.selected==='string'&&TROPHIES.some((o)=>o.id===data.selected&&S.progress.claimed[o.level-1])?data.selected:null;
     const next=nextMissing(S); if(next)S.focus=next.face;
@@ -420,7 +454,10 @@
     else delete S.progress.attempts[S.level];
     return S;
   }
-  const ROUTE = LEVELS[0].targets.map((face,i)=>({t:2.1+i*2.35,item:LEVELS[0].items.find((o)=>o.face===face)}));
+  const ROUTE = LEVELS[0].targets.flatMap((face,i)=>{
+    const item=LEVELS[0].items.find(o=>o.face===face),beat={t:2.1+i*2.35,item};
+    return LEVELS[0].caches.some(cache=>cache.face===face)?[{t:beat.t-.35,item},beat]:[beat];
+  });
   function scriptInput(t) {
     let from={x:1000,y:650},last=0;
     for(const beat of ROUTE) {
@@ -442,15 +479,16 @@
     return Object.assign(clone(cache.S),{loop,q});
   }
   function namedState(name='play') {
-    const number=/^level(?:[2-9]|1[0-2])$/.test(name)?Number(name.slice(5))-1:name==='win12'?2:name==='winlast'?5:name==='garden'||name==='gardenhint'?6:name==='gardenwin'?11:0,S=create(number);
+    const number=/^level(?:[2-9]|1[0-2])$/.test(name)?Number(name.slice(5))-1:name==='win12'||name==='silhouette'?2:name==='winlast'?5:name==='garden'||name==='gardenhint'?6:name==='gardenwin'?11:0,S=create(number);
     if(number>=3)for(let i=2;i<number;i++){S.progress.completed[i]=true;S.progress.claimed[i]=true;}
     for(let i=0;i<120;i++)step(S,{});
     if(['finds','hint','cooldown','win','win12','winlast','gardenhint','gardenwin'].includes(name)) {
       const n=name==='win'||name==='win12'||name==='winlast'||name==='gardenwin'?S.total:3;
-      for(const face of layout(S).targets.slice(0,n)) {const o=items(S).find((o)=>o.face===face);step(S,{px:o.x,py:o.y,tap:true,room:true});}
+      for(const face of layout(S).targets.slice(0,n)) {const o=items(S).find((o)=>o.face===face);if(itemHidden(S,o))tap(S,o.x,o.y,{room:true});step(S,{px:o.x,py:o.y,tap:true,room:true});}
     }
     if(name==='hint'||name==='cooldown'||name==='gardenhint')useHint(S);
     if(name==='cooldown')for(let i=0;i<390;i++)step(S,{});
+    if(name==='cacheopen')openCache(S,layout(S).caches[0].id);
     if(name==='drag') {
       const o=items(S).find((o)=>o.target); step(S,{px:o.x,py:o.y,press:true,room:true});step(S,{px:o.x+100,py:o.y+50,press:true,room:true});
     }
@@ -464,6 +502,8 @@
       if(def.targets.length!==[8,8,12,8,10,12,8,8,10,10,12,12][i]||new Set(def.targets).size!==def.targets.length)failures.push('Level '+(i+1)+' target count/uniqueness');
       if(!ROOMS.some((o)=>o.id===def.room&&i>=o.start&&i<o.end))failures.push('Level '+(i+1)+' invalid room range');
       if(def.items.some((o)=>!room(create(i)).faces.includes(o.face)))failures.push('Level '+(i+1)+' mixed-room objects');
+      if(!['classic','silhouette'].includes(def.searchStyle)||def.caches.length<2||def.caches.length>4||new Set(def.caches.map(cache=>cache.id)).size!==def.caches.length)failures.push('Level '+(i+1)+' invalid discovery metadata');
+      if(def.caches.some(cache=>!def.targets.includes(cache.face)||!def.items.some(item=>item.id===cache.itemId&&item.face===cache.face)))failures.push('Level '+(i+1)+' hides a non-target or wrong item');
       const S=create(i);
       if(i>=3)for(let previous=2;previous<i;previous++){S.progress.completed[previous]=true;S.progress.claimed[previous]=true;}
       for(const o of def.items) {
@@ -474,7 +514,7 @@
         const hit=hitTest(S,o.x,o.y);
         if(!hit||hit.id!==o.id)failures.push(o.id+' centre is covered by '+(hit&&hit.id));
       }
-      for(const face of def.targets) {const o=def.items.find((p)=>p.face===face);tap(S,o.x,o.y,{room:true});}
+      for(const face of def.targets) {const o=def.items.find((p)=>p.face===face);if(itemHidden(S,o))tap(S,o.x,o.y,{room:true});tap(S,o.x,o.y,{room:true});}
       if(S.mode!=='win'||S.count!==def.targets.length)failures.push('Level '+(i+1)+' cannot be completed');
       if(restoreSave(encodeSave(S)).mode!=='win')failures.push('Level '+(i+1)+' complete save does not round-trip');
     });
@@ -483,6 +523,6 @@
   root.SIM={DT,L,VIEW,WORLD,SOURCE,ALPHA,HINT:'Найди в комнате предметы с нижней панели. Образец выбирает предмет для подсказки. Enter — подсказка, F — во весь экран, R — начать заново.',
     SAVE_KEY,VERSION,FACES,FACE_IDS,FACE_NAMES,RECTS,LEVELS,TROPHIES,ROOMS,UI,HINT_COOLDOWN,HINT_REVEAL,TAP_SLOP,ROUTE,FRIEND_THRESHOLDS,CARE_COOLDOWN,CARE_DURATIONS,DAILY_TASKS,
     create,spawn,step,at,scriptInput,layout,items,clueSlots,hitTest,isFound,foundCount,nextMissing,hintRemaining,useHint,
-    tap,find,startLevel,levelUnlocked,room,roomUnlocked,collection,selectTrophy,interactTrophy,friendship,daily,syncDay,claimDaily,claimDailyChest,careStatus,care,tickCare,encodeSave,restoreSave,namedState,demoCheck,selfCheck,outOfPlay:()=>false};
+    tap,find,startLevel,caches,cacheFor,itemHidden,openCache,levelUnlocked,room,roomUnlocked,collection,selectTrophy,interactTrophy,friendship,daily,syncDay,claimDaily,claimDailyChest,careStatus,care,tickCare,encodeSave,restoreSave,namedState,demoCheck,selfCheck,outOfPlay:()=>false};
   if(typeof module!=='undefined')module.exports=root.SIM;
 })(typeof window!=='undefined'?window:globalThis);

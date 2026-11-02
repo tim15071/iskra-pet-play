@@ -36,7 +36,7 @@ button:focus-visible{outline:3px solid #14756f;outline-offset:5px}
 <body>
 <main id="stage" aria-label="Игра «Мир находок»">
 <canvas id="c" tabindex="0" role="application" aria-label="Мир Искры. Найди предметы из списка внизу." aria-describedby="instructions" aria-busy="true">Для игры нужен браузер с поддержкой WebGL2.</canvas>
-<p id="instructions" class="sr-only">Найди в комнате предметы с нижней панели. Коснись образца, чтобы выбрать предмет для подсказки. Все предметы видны на экране. Карта находок открывает комнаты и призы. Enter — подсказка, стрелки на клавиатуре — выбрать образец, F — полноэкранный режим, R — начать уровень заново, Escape — отменить касание или закрыть карту.</p>
+<p id="instructions" class="sr-only">Найди в комнате предметы с нижней панели. Коснись книги, корзины или листвы, чтобы раскрыть тайник, затем коснись находки. На некоторых уровнях образцы показаны силуэтами. Коснись образца для подсказки. Карта находок открывает комнаты и призы. Enter — подсказка, стрелки — выбрать образец, F — полный экран, R — начать заново, Escape — отменить касание или закрыть карту.</p>
 <div id="loading" class="overlay" role="status" aria-live="polite"><div class="mark" aria-hidden="true">✦</div><h1>Открываем мир Искры</h1><p>Искра готовит находки…</p></div>
 <div id="error" class="overlay" role="alert" hidden><div class="mark" aria-hidden="true">!</div><h1>Мир пока не открылся</h1><p id="error-message">Попробуй открыть его ещё раз.</p><button id="retry" type="button">Попробовать ещё раз</button></div>
 <div id="progress-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
@@ -46,7 +46,10 @@ button:focus-visible{outline:3px solid #14756f;outline-offset:5px}
 <script>window.__STATIC__ = 1;</script>
 <script>
 'use strict';
-const STATIC=!!window.__STATIC__,VERSION=STATIC?'campaign-4-care':Date.now();
+const STATIC=!!window.__STATIC__,VERSION=STATIC?'campaign-5-discovery':Date.now();
+const motionPreference=matchMedia('(prefers-reduced-motion: reduce)');
+window.ISKRA_REDUCED_MOTION=motionPreference.matches;
+motionPreference.addEventListener('change',event=>{window.ISKRA_REDUCED_MOTION=event.matches;});
 const query=new URLSearchParams(location.search),renderMode=query.has('render')&&query.get('render')!=='0';
 addEventListener('keydown',(event)=>{if(event.key==='Tab')document.documentElement.classList.add('keyboard-nav');});
 addEventListener('pointerdown',()=>document.documentElement.classList.remove('keyboard-nav'),{passive:true});
@@ -68,9 +71,15 @@ const sourceURL=(name)=>name+'?v='+VERSION;
 window.__ready=false;window.__renderErr=null;window.__fps=0;window.__play=null;
 let saveProgress=()=>{},watcherStarted=false,failed=false;
 let noticeTimer=0;
+function positionNotice(){
+  if(!window.SCENE||!window.ISKRA_VIEW)return;
+  const a=SCENE.layout(),r=canvas.getBoundingClientRect(),stage=document.getElementById('stage').getBoundingClientRect(),notice=document.getElementById('notice');
+  notice.style.top=(r.top-stage.top+a.headerH/ISKRA_VIEW.H*r.height+12)+'px';
+  notice.style.maxWidth=a.portrait?'min(70%, 520px)':'min(calc(100% - 40px), 520px)';
+}
 function showNotice(message){
   const notice=document.getElementById('notice');clearTimeout(noticeTimer);
-  notice.textContent=message;notice.hidden=false;noticeTimer=setTimeout(()=>{notice.hidden=true;},4000);
+  notice.textContent=message;positionNotice();notice.hidden=false;noticeTimer=setTimeout(()=>{notice.hidden=true;},4000);
 }
 window.toggleGameFullscreen=async()=>{
   try{
@@ -86,7 +95,7 @@ window.toggleGameFullscreen=async()=>{
     return true;
   }catch(_){showNotice('Не удалось включить полный экран. Можно продолжить играть.');return false;}
 };
-const WATCH=['index.html','scene.js','sim.js','journey.js','lib.js','gl.js','assets.js','sizes.js','iskra-rig.js','audio.js'];
+const WATCH=['index.html','scene.js','sim.js','journey.js','juice.js','effects-atlas.js','covers-atlas.js','lib.js','gl.js','assets.js','sizes.js','iskra-rig.js','audio.js'];
 function showError(error){
   if(!window.__renderErr){window.__renderErr=error;console.error(error);}
   failed=true;loading.hidden=true;errorPanel.hidden=false;canvas.setAttribute('aria-busy','false');
@@ -136,7 +145,7 @@ function watchSources(){
 (async()=>{
   for(const name of ['assets.js','sizes.js','gl.js','lib.js','sim.js','iskra-rig.js'])await loadScript(name);
   await loadOptionalScript('rig-config.js');
-  for(const name of ['scene.js','audio.js','journey.js'])await loadScript(name);
+  for(const name of ['effects-atlas.js','covers-atlas.js','juice.js','scene.js','audio.js','journey.js'])await loadScript(name);
   const bounds=measureViewport(),W=bounds.height>bounds.width?1080:1920;
   const view=window.ISKRA_VIEW=renderMode?{...SIM.VIEW}:{W,H:Math.round(W*bounds.ratio)};
   fitCanvas(view,bounds);
@@ -198,6 +207,7 @@ function watchSources(){
     updateGesture(event);const finished=gesture;gesture=null;releaseCapture(event.pointerId);
     if(finished.dragged)return;
     const{mapped}=mappedPointer(event);rememberPointer(mapped);
+    if(mapped.cache){SIM.openCache(play,mapped.cache);return;}
     if(mapped.trophy){
       if(!SIM.interactTrophy(play)){
         const status=SIM.careStatus(play),remaining=Math.ceil(status.actions.play.remaining);
@@ -248,7 +258,7 @@ function watchSources(){
   };
   const onResize=()=>{
     clearTimeout(resizeTimer);resizeTimer=setTimeout(()=>{
-      try{resizeRenderer(measureViewport());}catch(error){saveProgress();showError(error);}
+      try{resizeRenderer(measureViewport());positionNotice();}catch(error){saveProgress();showError(error);}
     },220);
   };
   addEventListener('resize',onResize);addEventListener('orientationchange',onResize);

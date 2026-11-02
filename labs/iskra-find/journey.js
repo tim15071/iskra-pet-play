@@ -217,7 +217,7 @@
         const available=SIM.roomUnlocked(S,region.id),button=node('button',{type:'button','data-room':region.id,'aria-pressed':String(region.id===room.id),'aria-label':region.name+(available?'':' — откроется после поиска 6')},[node('span',{text:region.name}),node('small',{text:available?count+' / 6':'После 6'})]);
         button.addEventListener('click',()=>{selectedRoom=region.id;render();rooms.querySelector('[data-room="'+region.id+'"]').focus({preventScroll:true});});rooms.appendChild(button);
       }
-      description.textContent=section==='care'?'Играй, отдыхай и угощай. Дружба улучшает подсказки.':section==='day'?'Три небольших задания — и подарок для Искры.':unlocked?room.name+' · шесть поисков и шесть призов.':'Сад откроется после поиска 6. Здесь можно посмотреть подарки.';
+      description.textContent=section==='care'?'Играй, отдыхай и угощай. Дружба улучшает подсказки.':section==='day'?'Три небольших задания — и подарок для Искры.':unlocked?room.name+' · раскрывай тайники и ищи по силуэтам.':'Сад откроется после поиска 6. Здесь можно посмотреть подарки.';
       for(const button of [levels,collection,careTab,dayTab])button.setAttribute('aria-pressed',String(button.dataset.section===section));
       const today=SIM.daily?SIM.daily(S):null,ready=today?today.tasks.filter(t=>t.ready&&!t.claimed).length+(today.chestReady?1:0):0;
       dayTab.textContent=ready?'День · '+ready:'День';collection.textContent='Призы';
@@ -229,7 +229,7 @@
         const available=SIM.levelUnlocked(S,i),completed=S.progress.completed[i],current=i===S.level,attempt=S.progress.attempts&&S.progress.attempts[i],partial=current?S.count:attempt?attempt.found.length:0;
         const card=node('button',{type:'button',class:'journey-card','data-level':i,'aria-label':'Поиск '+(i+1)+'. '+level.name+'. '+(available?completed?'Пройден':current?'Продолжить':'Играть':'Откроется после поиска '+i)},[
           node('span',{class:'journey-number',text:completed?'✓':String(i+1)}),picture(SIM.TROPHIES[i].face),node('strong',{text:level.name}),
-          node('small',{text:level.targets.length+' предметов · подарок'}),
+          node('small',{text:level.targets.length+' предметов · '+(level.searchStyle==='silhouette'?'силуэты':'тайники')}),
           node('span',{class:'journey-state',text:!available?'После поиска '+i:current?(S.mode==='win'?'Пройден · сыграть ещё':'Продолжить · '+S.count+' / '+S.total):completed?'Пройден · сыграть ещё':partial?'Продолжить · '+partial+' / '+level.targets.length:'Начать поиск'})]);
         if(!available)card.disabled=true;if(current)card.setAttribute('data-current','');
         card.addEventListener('click',()=>chooseLevel(i));grid.appendChild(card);

@@ -152,6 +152,8 @@
       handL: onPart('wingL', A.wingTipL), handR: onPart('wingR', A.wingTipR),
       tailBase: bodyPoint(P.tail.at), tailTip: onPart('tail', A.tailTip)
     };
+    if(A.eyeL)j.eyeL=onPart('head',A.eyeL);
+    if(A.eyeR)j.eyeR=onPart('head',A.eyeR);
     return { pose: p, matrices, joints: j };
   }
 

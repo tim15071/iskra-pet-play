@@ -36,6 +36,7 @@
     anchors: {
       footL: [-54, 0], footR: [52, 0], hip: [0, -62],
       headCentre: head.point([234, 325]), headTop: head.point([156, 8]), beak: head.point([248, 374]),
+      eyeL: head.point([179,295]), eyeR: head.point([319,294]),
       wingTipL: left.point([20, 418]), wingTipR: right.point([384, 391]),
       tailTip: tail.point([18, 384])
     }

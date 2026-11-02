@@ -75,20 +75,32 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
     const maxW=a.portrait?(a.narrow?112:132):150,maxH=a.portrait?150:146;
     if(a.portrait){
       const row2=guide.box[1]-91,row1=row2-(a.narrow?250:185);
-      for(let row=0;row<2;row++)for(let col=0;col<4;col++)positions.push([100+col*(a.W-200)/3,row?row2:row1]);
+      const offsets=[[-8,-35],[16,25],[-18,-65],[0,5],[14,-25],[-9,-5],[8,-50],[-3,15]];
+      for(let row=0;row<2;row++)for(let col=0;col<4;col++){const o=offsets[row*4+col];positions.push([100+col*(a.W-200)/3+o[0],(row?row2:row1)+o[1]]);}
       const width=Math.max(122,maxW),left=guide.box[0]+guide.box[2]+14+width/2,right=a.W-14-width/2;
-      for(let col=0;col<4;col++)positions.push([left+col*(right-left)/3,a.footerY-100]);
+      for(let col=0;col<4;col++)positions.push([left+col*(right-left)/3+[-4,3,-2,0][col],a.footerY-100+[-35,-95,10,-80][col]]);
     }else{
-      const left=guide.box[0]+guide.box[2]+100,right=a.W-100;
-      const lower=a.footerY-86,upper=lower-178;
-      for(let row=0;row<2;row++)for(let col=0;col<6;col++)positions.push([left+col*(right-left)/5,row?lower:upper]);
+      const floor=a.originY+600*SIM.SOURCE.scale*a.scale,bench=a.originY+530*SIM.SOURCE.scale*a.scale,span=a.footerY-floor;
+      const points=[[.10,bench-60],[.84,bench-58],[.24,floor+span*.15],[.43,floor+span*.08],[.63,floor+span*.20],[.92,floor+span*.26],
+        [.30,floor+span*.49],[.52,floor+span*.61],[.77,floor+span*.53],[.18,a.footerY-85],[.61,a.footerY-77],[.91,a.footerY-92]];
+      for(const [x,y]of points)positions.push([x*a.W,clamp(y,a.headerH+92,a.footerY-86)]);
     }
     return SIM.items(ST).map(item=>{
-      const slot=order[item.face-12],[x,y]=positions[slot],scale=Math.min(maxW/item.w,maxH/item.h),w=item.w*scale,h=item.h*scale;
+      const slot=order[item.face-12];let [x,y]=positions[slot];const depth=!a.portrait&&slot<6?.83:1,scale=Math.min(maxW*depth/item.w,maxH*depth/item.h),w=item.w*scale,h=item.h*scale;
+      const hit=expanded({x:x-w/2,y:y-h/2,w,h},a.portrait?122:104);
+      y=clamp(y,a.headerH+12+hit.h/2,a.footerY-12-hit.h/2);
+      if(x-hit.w/2<guide.box[0]+guide.box[2]&&x+hit.w/2>guide.box[0]&&y+hit.h/2>guide.box[1]&&y-hit.h/2<guide.box[1]+guide.box[3])x=guide.box[0]+guide.box[2]+12+hit.w/2;
       return{item,x,y,w,h,rot:0,slot,hanging:false,contact:{x,y:y+(SIM.ALPHA[item.face][3]/SIM.RECTS[item.face][3]-.5)*h},cord:null,
         hit:expanded({x:x-w/2,y:y-h/2,w,h},a.portrait?122:104)};
     });
   };
+  S.coverPlacements=(ST=state())=>SIM.caches(ST).map(cache=>{
+    const p=S.itemPlacements(ST).find(p=>p.item.id===cache.itemId),rect=(window.COVER_FRAMES||{})[cache.kind];
+    if(!p||!rect)return null;const w=Math.min(p.hit.w-8,178),h=w*rect[3]/rect[2],contact=p.contact?p.contact.y:p.y+p.h*.46;
+    const y=contact-(.5-8/rect[3])*h;
+    const e=(ST.ev||[]).slice().reverse().find(e=>e.k==='cache'&&e.id===cache.id),q=cache.open?(window.ISKRA_REDUCED_MOTION?1:e?smooth((ST.t-e.t)/.38):1):0;
+    return{cache,item:p.item,x:p.x,y,w,h,rect,q,hit:p.hit,contact};
+  }).filter(Boolean);
   S.toScreen = (x,y,ST=state()) => {
     const p=S.itemPlacements(ST).find(p=>Math.abs(p.item.x-x)<.001&&Math.abs(p.item.y-y)<.001);
     if(p)return [p.x,p.y];const a=S.layout();return [a.originX+x*a.scale,a.originY+y*a.scale];
@@ -150,7 +162,7 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
     if(clue) {const model=SIM.clueSlots(ST).find((r)=>r.face===clue.face);return Object.assign(centre(model),{hud:'clue',face:clue.face});}
     const guide=S.guide();if(inBox(x,y,{x:guide.box[0],y:guide.box[1],w:guide.box[2],h:guide.box[3]}))return {blocked:true,guide:true};
     const item=S.itemPlacements(ST).slice().reverse().find(p=>!SIM.isFound(ST,p.item)&&inBox(x,y,p.hit));
-    if(item)return {px:item.item.x,py:item.item.y,room:true,item:item.item.id};
+    if(item){const cache=SIM.cacheFor(ST,item.item);return {px:item.item.x,py:item.item.y,room:true,item:item.item.id,...(cache&&!cache.open?{cache:cache.id}:{})};}
     return {blocked:true,room:true};
   };
   const labels={};let measure=null;
@@ -208,20 +220,34 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
     if(on){gl.enable(gl.SCISSOR_TEST);gl.scissor(Math.floor(a.room.x),Math.floor(a.H-a.room.y-a.room.h),Math.ceil(a.room.w),Math.ceil(a.room.h));}
     else gl.disable(gl.SCISSOR_TEST);
   }
+  S.fxContext=(ST,winPanel)=>{
+    const guide=S.guide(ST),placements=S.itemPlacements(ST),care=S.careGeometry(ST),gaze=S.toScreen(ST.x,ST.y,ST);
+    return {a:S.layout(ST),guide,placements,care,winPanel,reducedMotion:!!window.ISKRA_REDUCED_MOTION,
+      joints:window.ISKRA_RIG&&window.ISKRA_RIG.joints(Object.assign({},ST,{rigTarget:gaze}),ST.t,guide.x,guide.y,guide.scale),
+      point:id=>placements.find(p=>p.item.id===id),toScreen:(x,y)=>S.toScreen(x,y,ST),
+      cachePoint:e=>S.coverPlacements(ST).find(p=>p.cache.id===e.id),
+      careAt:age=>ST.careAction?S.careGeometry(Object.assign({},ST,{pet:Object.assign({},ST.pet,{clock:ST.careAction.started+age})})):null};
+  };
+  function cover(p,alpha){
+    if(alpha<=.002)return;const tx=G.tex('covers'),r=p.rect;
+    L.sprite('covers',p.x-p.w/2,p.y-p.h/2,{w:p.w,h:p.h,src:[r[0]/tx.w,r[1]/tx.h,(r[0]+r[2])/tx.w,(r[1]+r[3])/tx.h],u:{alpha}});
+  }
   function drawRoom(ST,t,a) {
     const R=a.room,k=a.scale;
     clipRoom(a,true);
     L.sprite(SIM.room(ST).texture,a.originX,a.originY,{w:SIM.WORLD.W*k,h:SIM.WORLD.H*k});
     clipRoom(a,false);
     L.beginComp();clipRoom(a,true);
-    const care=S.careGeometry(ST);
+    const care=S.careGeometry(ST),fx=S.fxContext(ST),covers=S.coverPlacements(ST);
     if(care&&care.kind==='rest')L.solid(0,0,a.W,a.H,[.08,.17,.27],0,0,0,.13*care.weight);
+    if(window.JUICE)JUICE.ambient(ST,fx);
+    for(const p of covers)cover(p,p.q);
     for(const p of S.itemPlacements(ST)) {
       const o=p.item;
       if(SIM.isFound(ST,o))continue;
       const {x,y}=p,hv=ST.hov[o.id]?ST.hov[o.id][0]:0,scale=1+hv*.065;
       const last=(ST.ev||[]).slice().reverse().find((e)=>e.k==='distractor'&&e.id===o.id),age=last?ST.t-last.t:99;
-      const wobble=age<.55?.045*Math.sin(age*25)*Math.exp(-age*7):0;
+      const wobble=!window.ISKRA_REDUCED_MOTION&&age<.55?.045*Math.sin(age*25)*Math.exp(-age*7):0;
       if(p.contact)L.shadow(p.contact.x,p.contact.y+2,p.w*.32,5,.28);
       if(p.cord) {
         const u=p.cord.from,q=p.cord.to;
@@ -230,23 +256,16 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
       }
       toy(o.face,x,y-hv*4,p.w*scale,p.h*scale,p.rot+wobble);
     }
+    for(const p of covers)cover(p,1-p.q);
     const hinted=ST.hint&&ST.hint.until>ST.t&&S.itemPlacements(ST).find((p)=>p.item.id===ST.hint.id&&!SIM.isFound(ST,p.item));
     if(hinted) {
       const {x,y}=hinted,fade=Math.min(1,(ST.hint.until-ST.t)*3),r=Math.max(hinted.w,hinted.h)*.85;
       G.draw(L.P.hintveil,{u_at:[x,y],u_r:r,u_a:.42*fade},G.xf(R.x,R.y,R.w,R.h));
-      L.glow(x,y,r*1.9,[1,.81,.32],.20*fade,3.5);
-      L.ring(x,y,r*(1+.04*Math.sin(ST.t*4)),r*(1+.04*Math.sin(ST.t*4)),[1,.86,.32],.94*fade,.047);
-      L.ring(x,y,r*1.10,r*1.10,[1,1,.80],.64*fade,.022);
       toy(hinted.item.face,x,y,hinted.w,hinted.h,hinted.rot);
-      for(let j=0;j<4;j++){const ang=j*Math.PI/2+.18*Math.sin(ST.t*1.7);L.star(x+Math.cos(ang)*r*1.12,y+Math.sin(ang)*r*1.12,10*k,[1,.94,.59],fade*.9);}
     }
+    if(window.JUICE)JUICE.world(ST,fx);
     for(const e of ST.ev||[]) {
       const age=ST.t-e.t;if(age<0)continue;const [x,y]=S.toScreen(e.x||0,e.y||0,ST);
-      if(e.k==='find'&&age<.85) {
-        const q=age/.85;
-        for(let j=0;j<10;j++) {const ang=j*Math.PI*.2+e.face*.73,r=(16+62*smooth(q))*k;L.star(x+Math.cos(ang)*r,y+Math.sin(ang)*r-30*k*q,7*k*(1-q)+3,[1,.93,.55],(1-q)*.9);}
-        L.ring(x,y,(22+54*q)*k,(22+54*q)*k,[1,.94,.64],(1-q)*.75,.05);
-      }
       if((e.k==='tap'||e.k==='distractor')&&age<.45){const q=age/.45;L.ring(x,y,(10+25*q)*k,(10+25*q)*k,[1,.97,.79],(1-q)*.6,.08);}
     }
     if(window.ISKRA_RIG) {
@@ -265,19 +284,15 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
       L.rrect(label.x,label.y,label.w,label.h,14,C.cream,C.cream,.9);L.uiBox('trophy_label',label.x,label.y,label.w,label.h,4);
       const remaining=Math.ceil(SIM.careStatus(ST).actions.play.remaining);
       text('trophy_name',care?care.kind==='play'?'Играем':care.kind==='feed'?'Угощаем':'Отдыхаем':remaining>0?'Ещё '+remaining+' с':'Мой приз',p.x,label.y+21,136,a.narrow?32:26);
-      if(age<1)for(let i=0;i<7;i++){const q=age,ang=i*Math.PI*2/7;L.star(p.x+Math.cos(ang)*(32+q*60),p.y-12+Math.sin(ang)*(32+q*60),8*(1-q),[1,.93,.55],1-q);}
     }
     if(care){
       const p=S.guide(ST);
       if(care.kind==='play'||care.kind==='feed'){
         if(care.size>0.2){const icon=care.kind==='play'?care:S.toyFit(care.face,care.size,care.size);toy(care.face,care.x,care.y,icon.w,icon.h,care.rot);}
         if(care.kind==='feed'&&care.age>=1.05&&care.age<1.35)L.anchor('food_beak_contact',care.joints.beak,[care.x,care.y],1);
-        if(care.kind==='feed'&&care.age>1.1){const u=clamp((care.age-1.1)/1.1,0,1);for(let i=0;i<5;i++){const angle=i*Math.PI*.4;L.star(care.joints.beak[0]+Math.cos(angle)*(16+35*u)*p.scale,care.joints.beak[1]+Math.sin(angle)*(16+35*u)*p.scale,5*p.scale*(1-u),[1,.88,.42],(1-u)*.8);}}
-      }else{
-        const head=care.joints.head;L.glow(head[0],head[1]+50*p.scale,70*p.scale,[1,.79,.35],.06*care.weight,3);
-        for(let i=0;i<3;i++){const phase=(care.age*.7+i/3)%1;L.star(head[0]+(45+i*17)*p.scale,head[1]-(30+phase*45)*p.scale,(4+i)*p.scale,[1,.89,.57],Math.sin(phase*Math.PI)*.5*care.weight);}
       }
     }
+    if(window.JUICE)JUICE.care(ST,fx);
     clipRoom(a,false);
     // The supplied room already contains its finished light and colour grade.
     // A single copy preserves that artwork and avoids six unused bloom passes.
@@ -286,7 +301,8 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
   function drawHeader(ST,a) {
     panel('header_title',a.title,C.paper,false,12);
     text('title','Карта и забота  ›',32,a.portrait?43:37,a.title.w-32,a.portrait?35:37,{al:0});
-    text('level_title',a.portrait?'Уровень '+(ST.level+1)+'  ·  Найдено '+ST.count+' / '+ST.total:'Уровень '+(ST.level+1)+'  ·  '+SIM.layout(ST).name,32,a.portrait?83:68,a.title.w-32,a.narrow?34:a.portrait?25:20,{al:0,col:'#35695f',weight:'800'});
+    const mode=SIM.layout(ST).searchStyle==='silhouette'?'Силуэты':'Тайники';
+    text('level_title',a.portrait?'Поиск '+(ST.level+1)+' · '+ST.count+'/'+ST.total+' · '+mode:'Поиск '+(ST.level+1)+' · '+(mode==='Силуэты'?'Ищи по силуэтам':'Коснись тайника, затем находки'),32,a.portrait?83:68,a.title.w-32,a.narrow?32:a.portrait?25:20,{al:0,col:'#35695f',weight:'800'});
     if(!a.portrait) {
       panel('count_panel',a.count,[.88,.94,.82],false,8);
       text('count_label','НАЙДЕНО',a.count.x+a.count.w/2,a.count.y+19,a.count.w-24,17,{col:'#35695f'});
@@ -310,7 +326,8 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
       L.rrect(r.x,r.y,r.w,r.h,18,got?[.83,.94,.79]:C.cream,got?[.75,.89,.72]:[1,.96,.84],.72);
       L.uiBox('clue_'+i,r.x,r.y,r.w,r.h,6);
       const maxH=a.narrow?54:70,maxW=r.w-30,rect=SIM.FACES[r.face].rect,scale=Math.min(maxW/rect[2],maxH/rect[3]);
-      toy(r.face,r.x+r.w/2,r.y+(a.narrow?31:39),rect[2]*scale,rect[3]*scale,0,got?.87:1);
+      const silhouette=!got&&SIM.layout(ST).searchStyle==='silhouette';
+      toy(r.face,r.x+r.w/2,r.y+(a.narrow?31:39),rect[2]*scale,rect[3]*scale,0,got?.87:1,silhouette?{grade:[0,0,1,1],haze:[.10,.28,.30]}:{});
       text('clue_name_'+i,SIM.FACES[r.face].name,r.x+r.w/2,r.y+r.h-(a.narrow?26:18),r.w-14,a.narrow?34:a.portrait?22:21,{col:got?'#3b7252':'#245b60'});
       if(got)check(r.x+r.w-18,r.y+17,14);
     }
@@ -318,7 +335,7 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
   function drawFlights(ST) {
     if(ST.mode==='win')return;
     for(const o of SIM.items(ST)) {
-      if(!SIM.isFound(ST,o))continue;const age=ST.t-ST.found[o.id];if(age<0||age>.8)continue;
+      if(!SIM.isFound(ST,o)||window.ISKRA_REDUCED_MOTION)continue;const age=ST.t-ST.found[o.id];if(age<0||age>.8)continue;
       const q=smooth(age/.8),p=S.toScreen(o.x,o.y,ST),slot=S.clues(ST).find((r)=>r.face===o.face);if(!slot)continue;
       const tx=slot.x+slot.w/2,ty=slot.y+44,x=p[0]+(tx-p[0])*q,y=p[1]+(ty-p[1])*q-Math.sin(q*Math.PI)*110;
       const placed=S.itemPlacements(ST).find(p=>p.item.id===o.id),icon=S.toyFit(o.face,74,74),w=placed.w+(icon.w-placed.w)*q,h=placed.h+(icon.h-placed.h)*q;
@@ -330,6 +347,7 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
     const r={x:a.W/2-(a.portrait?480:540),y:a.H/2-(a.portrait?330:280),w:a.portrait?960:1080,h:a.portrait?660:560};
     panel('win_panel',r,C.cream,true,24);
     L.rrect(r.x+16,r.y+16,r.w-32,11,5,C.gold,C.gold);
+    if(window.JUICE)JUICE.win(ST,S.fxContext(ST,r));
     const reward=SIM.TROPHIES&&SIM.TROPHIES[ST.level];
     const face=reward?reward.face:10,icon=S.toyFit(face,110,110);
     toy(face,a.W/2,r.y+107,icon.w,icon.h,0);
@@ -338,11 +356,6 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
     text('win_count',reward?(ST.reward&&ST.reward.first?'Новый приз: ':'В коллекции: ')+reward.name:ST.count+' из '+ST.total+'  —  отлично!',a.W/2,r.y+331,r.w-100,40,{col:'#926219'});
     const b=S.winButtons();button('win_replay',b.replay,'Ещё раз',{quiet:true,size:33});
     button('win_next',b.next,ST.level<SIM.LEVELS.length-1?'Следующий поиск':'Играть сначала',{gold:true,size:31});
-    const age=ST.wonAt>=0?ST.t-ST.wonAt:99;
-    if(age<2.4)for(let i=0;i<36;i++) {
-      const u=age/2.4,seed=L.rnd(i,2),x=a.W/2+(seed-.5)*r.w*1.2*(.2+u),y=r.y+130+(L.rnd(i,7)-.5)*220-age*95+age*age*68;
-      const size=5+L.rnd(i,11)*8;L.solid(x,y,size,size*.55,i%2?C.gold:C.mint,age*2+i,0,0,(1-u)*.9);
-    }
   }
   S.render = (t) => {
     const ST=S.state||SIM.at(t),a=S.layout();L.beginBG([...C.paper,1]);
@@ -350,7 +363,7 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
     if(ST.mode==='win')drawWin(ST,a);
   };
   S.QA = () => {
-    const names=['match','play','finds','hint','cooldown','level2','level3','level4','level5','level6','garden','gardenhint','gardenwin','win','win12','winlast','drag'];
+    const names=['match','play','finds','hint','cooldown','level2','level3','level4','level5','level6','garden','gardenhint','gardenwin','win','win12','winlast','drag','discovery','cacheopen','silhouette'];
     const states=names.map((n)=>[n,SIM.namedState(n)]),base=SIM.namedState('play');
     if(SIM.TROPHIES){const placed=SIM.namedState('play');placed.progress.completed[0]=true;placed.progress.claimed[0]=true;SIM.selectTrophy(placed,SIM.TROPHIES[0].id);states.push(['trophy',placed]);}
     {const placed=SIM.namedState('garden');placed.progress.completed[6]=true;placed.progress.claimed[6]=true;SIM.selectTrophy(placed,SIM.TROPHIES[6].id);states.push(['gardenprize',placed]);}
@@ -362,8 +375,22 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
     states.push(['care_cooldown',careState('play',3)]);
     const loop=window.ISKRA_RIG?window.ISKRA_RIG.qaLoop(base):[];
     const careLoops={};for(const kind of ['play','rest','feed']){const duration=SIM.CARE_DURATIONS[kind];careLoops['care_'+kind]=Array.from({length:24},(_,i)=>careState(kind,i*duration/24));}
+    const anim={};
+    const motion=(name,make,box)=>{const on=Array.from({length:12},(_,i)=>make(i/60)),off=on.map(st=>Object.assign({},st,{juiceDisabled:true}));anim[name]={on,off,box,min:.003};};
+    for(const [name,level,event]of [['workshop_find',0,'find'],['garden_find',6,'find'],['cache_reveal',0,'cache'],['hint_firefly',0,'hint'],['win_ribbons',0,'win']]){
+      const base=SIM.create(level);if(level>=3)for(let i=2;i<level;i++)base.progress.completed[i]=true;
+      if(event==='cache')SIM.openCache(base,SIM.caches(base)[0].id);
+      else if(event==='hint')SIM.useHint(base);
+      else if(event==='win'){for(const item of SIM.items(base).filter(o=>o.target)){const cache=SIM.cacheFor(base,item);if(cache)SIM.openCache(base,cache.id);SIM.find(base,item);}}
+      else{const item=SIM.items(base).find(o=>o.target&&!SIM.itemHidden(base,o));SIM.find(base,item);}
+      const fxState=dt=>Object.assign({},base,{t:base.t+.18+dt});
+      states.push(['fx_'+name,fxState(.08)]);
+      const origin=event==='cache'?S.coverPlacements(base)[0]:null;
+      motion(name,fxState,origin?[Math.floor(origin.x-140),Math.floor(origin.y-130),280,260]:undefined);
+    }
+    for(const kind of ['play','rest','feed'])motion('care_'+kind,dt=>careState(kind,(kind==='feed'?1.2:kind==='rest'?.65:.4)+dt),S.guide().box);
     return {states,cycles:{},loops:Object.assign(loop.length?{iskra_idle:loop}:{},careLoops),subject:{iskra_idle:'iskra',care_play:'iskra',care_rest:'iskra',care_feed:'iskra'},actors:loop.length?['iskra']:[],
       sprites:{iskra_idle:window.ISKRA_RIG?window.ISKRA_RIG.textures:[]},
-      box:()=>S.guide().box};
+      anim,box:()=>S.guide().box};
   };
 })();
