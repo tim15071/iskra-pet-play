@@ -46,7 +46,7 @@ button:focus-visible{outline:3px solid #14756f;outline-offset:5px}
 <script>window.__STATIC__ = 1;</script>
 <script>
 'use strict';
-const STATIC=!!window.__STATIC__,VERSION=Date.now();
+const STATIC=!!window.__STATIC__,VERSION=STATIC?'campaign-2-webp':Date.now();
 const query=new URLSearchParams(location.search),renderMode=query.has('render')&&query.get('render')!=='0';
 addEventListener('keydown',(event)=>{if(event.key==='Tab')document.documentElement.classList.add('keyboard-nav');});
 addEventListener('pointerdown',()=>document.documentElement.classList.remove('keyboard-nav'),{passive:true});
@@ -64,7 +64,7 @@ function fitCanvas(view,bounds=measureViewport()){
   const ratio=view.H/view.W,width=Math.min(bounds.width,bounds.height/ratio);
   canvas.style.width=width+'px';canvas.style.height=width*ratio+'px';
 }
-const sourceURL=(name)=>name+(STATIC?'':'?v='+VERSION);
+const sourceURL=(name)=>name+'?v='+VERSION;
 window.__ready=false;window.__renderErr=null;window.__fps=0;window.__play=null;
 let saveProgress=()=>{},watcherStarted=false,failed=false;
 let noticeTimer=0;
@@ -142,7 +142,17 @@ function watchSources(){
   fitCanvas(view,bounds);
   G.init(canvas,view.W,view.H);
   const repeated=new Set(SCENE.REPEAT||[]),near=(name)=>SCENE.NEAREST===true||(SCENE.NEAREST||[]).includes(name);
-  await Promise.all(Object.keys(ASSETS).map((name)=>G.load(name,sourceURL('assets/'+name+'.png'),{repeat:repeated.has(name),nearest:near(name)})));
+  const textureNames=Object.keys(ASSETS);let texturesReady=0;
+  const assetTimeout=setTimeout(()=>showError(new Error('Загрузка изображений заняла слишком долго')),45000);
+  try{
+    await Promise.all(textureNames.map(async(name)=>{
+      const options={repeat:repeated.has(name),nearest:near(name)};
+      try{await G.load(name,sourceURL('assets/'+name+'.webp'),options);}
+      catch(_){await G.load(name,sourceURL('assets/'+name+'.png'),options);}
+      texturesReady++;loading.querySelector('p').textContent='Готово '+texturesReady+' из '+textureNames.length+' иллюстраций';
+    }));
+  }finally{clearTimeout(assetTimeout);}
+  if(failed)return;
   await document.fonts.load('850 32px "Iskra"');
   await document.fonts.load('900 32px "Nunito"');
   SCENE.programs();window.__duration=SIM.L;
@@ -162,7 +172,7 @@ function watchSources(){
   const releaseCapture=(id)=>{try{if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}catch(_){}};
   const cancelGesture=()=>{if(gesture){const id=gesture.id;gesture=null;releaseCapture(id);}};
   const clearInput=()=>{Object.keys(keys).forEach((key)=>delete keys[key]);taps.length=0;cancelGesture();};
-  const journey=JOURNEY.init({state:()=>play,save:()=>saveProgress(),clearInput,notice:showNotice});
+  const journey=JOURNEY.init({state:()=>play,save:()=>saveProgress(),clearInput,notice:showNotice,assetURL:sourceURL});
   const updateGesture=(event)=>{
     if(!gesture||gesture.id!==event.pointerId)return;
     const dx=event.clientX-gesture.x,dy=event.clientY-gesture.y;

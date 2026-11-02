@@ -57,7 +57,7 @@
       if(key==='text')el.textContent=value;else if(key==='class')el.className=value;else el.setAttribute(key,value);
     }for(const child of children)el.appendChild(child);return el;
   }
-  window.JOURNEY={init({state,save,clearInput,notice}){
+  window.JOURNEY={init({state,save,clearInput,notice,assetURL=(url)=>url}){
     const stage=document.getElementById('stage'),canvas=document.getElementById('c');
     const opener=node('button',{id:'journey-open',type:'button','aria-label':'Открыть карту поисков и коллекцию','aria-haspopup':'dialog'});
     const dialog=node('dialog',{id:'journey','aria-labelledby':'journey-title','aria-describedby':'journey-description'});
@@ -73,7 +73,7 @@
     dialog.appendChild(node('div',{class:'journey-shell'},[head,tabs,body,node('footer',{class:'journey-bottom'},[summary,action])]));
     const winCollection=node('button',{id:'win-collection',type:'button',text:'Мои призы ›',hidden:''});
     stage.append(opener,winCollection,dialog);
-    let section='levels',revision=-1,lastWin=-1,positionKey='';const atlas=new Image();atlas.src='assets/toys.png';
+    let section='levels',revision=-1,lastWin=-1,positionKey='';const atlas=new Image();atlas.onerror=()=>{atlas.onerror=null;atlas.src=assetURL('assets/toys.png');};atlas.src=assetURL('assets/toys.webp');
     atlas.onload=()=>{if(dialog.open)render();};
     function picture(face){
       const cv=node('canvas',{width:200,height:200,'aria-hidden':'true'});
