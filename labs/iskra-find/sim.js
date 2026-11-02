@@ -3,7 +3,8 @@
 (function (root) {
   'use strict';
   const DT = 1 / 120, L = 25, VIEW = { W: 1920, H: 1080 }, WORLD = { W: 1920, H: 1440 };
-  const SAVE_KEY = 'iskra-ref2game-find-v1', VERSION = 1;
+  // Keep the original storage key: v2 upgrades the first trial in place.
+  const SAVE_KEY = 'iskra-ref2game-find-v1', VERSION = 2;
   const HINT_COOLDOWN = 8, HINT_REVEAL = 3.2, TAP_SLOP = 22;
   const FACE_IDS = ['rocket', 'duck', 'dinosaur', 'star', 'airplane', 'candy', 'top', 'strawberry', 'ball', 'shell', 'crown', 'gamepad'];
   const FACE_NAMES = ['Ракета', 'Уточка', 'Динозаврик', 'Звёздочка', 'Самолётик', 'Конфета', 'Юла', 'Клубника', 'Мяч', 'Ракушка', 'Корона', 'Геймпад'];
@@ -44,6 +45,29 @@
       [9,85,259,98,'upper-left-shelf'], [10,276,503,106,'left-worktop'], [11,1250,507,90,'right-worktop']
     ])
   ];
+  // New searches reuse measured furniture supports, with different ground toys.
+  // Hanging star/plane remain hanging: a shelf toy is never put on a cord.
+  const groundFaces = [0,1,2,5,6,7,8,9,10,11];
+  function remixRows(base,shift) {
+    return base.items.map((item) => {
+      const ground=groundFaces.indexOf(item.face),face=ground<0?item.face:groundFaces[(ground+shift)%groundFaces.length];
+      const sh=ground<0?item.source.height:face===5?80:90;
+      return [face,item.source.x,item.source.y,sh,item.support,item.cord?item.cord.from[1]/SOURCE.scale:undefined];
+    });
+  }
+  LEVELS.push(
+    level(4,'Секретные полки','Найди 8 сокровищ мастерской',[0,2,3,5,6,7,9,11],remixRows(LEVELS[0],3)),
+    level(5,'Игрушечная экспедиция','Найди 10 любимых вещей',[0,1,2,3,4,6,7,8,10,11],remixRows(LEVELS[1],4)),
+    level(6,'Сокровища Искры','Последний большой поиск: 12 игрушек',[0,1,2,3,4,5,6,7,8,9,10,11],remixRows(LEVELS[2],7))
+  );
+  const TROPHIES = [
+    {id:'rocket',name:'Ракета мечты',face:0,level:1},
+    {id:'duck',name:'Солнечная уточка',face:1,level:2},
+    {id:'dinosaur',name:'Друг-динозаврик',face:2,level:3},
+    {id:'star',name:'Звезда открытий',face:3,level:4},
+    {id:'crown',name:'Корона сыщика',face:10,level:5},
+    {id:'gamepad',name:'Геймпад чемпиона',face:11,level:6}
+  ];
   const UI = {
     hint: { x: 1576, y: 36, w: 288, h: 90 },
     restart: { x: 1296, y: 36, w: 244, h: 90 },
@@ -59,25 +83,79 @@
   const has = (o,k) => Object.prototype.hasOwnProperty.call(o,k);
   const isFound = (S,item) => has(S.found, typeof item === 'string' ? item : item.id);
   const foundCount = (S) => items(S).filter((o) => o.target && isFound(S,o)).length;
+  const levelUnlocked = (S,n) => Number.isInteger(n)&&n>=0&&n<LEVELS.length&&(n<3||S.progress.completed[n-1]===true);
+  const collection = (S) => TROPHIES.map((o)=>Object.assign({},o,{unlocked:S.progress.claimed[o.level-1]===true,selected:S.progress.selected===o.id}));
+  function selectTrophy(S,id) {
+    if(id!==null&&!TROPHIES.some((o)=>o.id===id&&S.progress.claimed[o.level-1]===true))return false;
+    if(S.progress.selected===id)return true;
+    S.progress.selected=id;S.revision++;event(S,'decoration',{id});return true;
+  }
+  function interactTrophy(S) {
+    if(S.mode!=='play')return false;
+    const trophy=collection(S).find((o)=>o.selected&&o.unlocked);
+    if(!trophy)return false;
+    S.reaction.joyV+=6;event(S,'trophy',{id:trophy.id,face:trophy.face});return true;
+  }
+  function award(S) {
+    const trophy=TROPHIES[S.level],first=S.progress.claimed[S.level]!==true;
+    S.progress.completed[S.level]=true;S.progress.claimed[S.level]=true;
+    delete S.progress.attempts[S.level];
+    S.reward={id:trophy.id,first};
+    return S.reward;
+  }
   function clueSlots(S) {
     const target = layout(S).targets, w = 128, gap = 12;
     const start = (VIEW.W - target.length * w - (target.length-1) * gap) / 2;
     return target.map((face,i) => ({ x: start+i*(w+gap), y: 919, w, h: 116, face, item: items(S).find((o) => o.face === face) }));
   }
   const event = (S,k,data={}) => { S.ev.push(Object.assign({k,t:S.t},data)); if (S.ev.length>64) S.ev.splice(0,S.ev.length-64); };
+  // Off-screen attempts are finite snapshots, never live simulation objects.
+  function cleanAttempt(number,data) {
+    if(!data||typeof data!=='object'||Array.isArray(data))return null;
+    const valid=new Set(LEVELS[number].items.filter((o)=>o.target).map((o)=>o.id));
+    const found=[...new Set((Array.isArray(data.found)?data.found:[]).slice(0,12).filter((id)=>typeof id==='string'&&valid.has(id)))];
+    // A real last find awards immediately. A complete off-screen attempt is
+    // inconsistent input and must not create an unfinishable board or a prize.
+    if(found.length===valid.size)return null;
+    return {found,hintRemaining:typeof data.hintRemaining==='number'&&Number.isFinite(data.hintRemaining)?clamp(data.hintRemaining,0,HINT_COOLDOWN):0,
+      hintUses:Number.isInteger(data.hintUses)?clamp(data.hintUses,0,99999):0};
+  }
+  function attemptSnapshot(S) {
+    return {found:Object.keys(S.found),hintRemaining:hintRemaining(S),hintUses:S.hintUses};
+  }
+  function applyAttempt(S,data) {
+    const attempt=cleanAttempt(S.level,data);if(!attempt)return;
+    S.found=Object.fromEntries(attempt.found.map((id)=>[id,-1]));S.count=foundCount(S);
+    S.hint.readyAt=S.t+attempt.hintRemaining;S.hintUses=attempt.hintUses;
+    const next=nextMissing(S);if(next)S.focus=next.face;
+  }
+  function savedAttempts(S) {
+    const out={};
+    for(let i=0;i<LEVELS.length;i++)if(!S.progress.completed[i]) {
+      const attempt=cleanAttempt(i,S.progress.attempts[i]);if(attempt)out[i]=attempt;
+    }
+    if(S.mode==='play'&&!S.progress.completed[S.level])out[S.level]=attemptSnapshot(S);
+    else delete out[S.level];
+    return out;
+  }
   function create(number=0) {
     const n = clamp(number | 0,0,LEVELS.length-1), def = LEVELS[n];
     return { schema: VERSION, t: 0, steps: 0, wt0: 0, level: n, mode: 'play', found: {}, count: 0, total: def.targets.length,
       focus: def.targets[0], hint: { id: '', until: -1, readyAt: 0 }, hintUses: 0, ev: [],
       x: VIEW.W/2, y: VIEW.H/2, press: 0, pointer: null, hoverId: '', hov: Object.fromEntries(def.items.map((o)=>[o.id,[0,0]])),
-      progress: { completed: [false,false,false] }, revision: 0, wonAt: -1, lastFound: '', lastMiss: '',
+      progress: { completed: LEVELS.map(()=>false),claimed:LEVELS.map(()=>false),selected:null,attempts:{} },reward:null,revision: 0, wonAt: -1, lastFound: '', lastMiss: '',
       gestureBlocked: false, controls: { act: false, left: false, right: false, jump: false },
       reaction: { joy: 0, joyV: 0, curious: 0, curiousV: 0 } };
   }
   function spawn(worldT=0) { const S = create(); S.wt0 = Number.isFinite(worldT) ? worldT : 0; return S; }
   function startLevel(S,number,replay=false) {
-    const previous = S.level, n = clamp(number|0,0,LEVELS.length-1), keep = { t:S.t,steps:S.steps,wt0:S.wt0,progress:clone(S.progress),revision:S.revision+1,controls:S.controls };
+    if(!levelUnlocked(S,number))return false;
+    const previous = S.level, n = number, keep = { t:S.t,steps:S.steps,wt0:S.wt0,progress:clone(S.progress),revision:S.revision+1,controls:S.controls };
+    keep.progress.attempts=replay?clone(S.progress.attempts):savedAttempts(S);
+    if(replay||keep.progress.completed[n])delete keep.progress.attempts[n];
+    const resume=!replay&&!keep.progress.completed[n]?keep.progress.attempts[n]:null;
     Object.assign(S,create(n),keep);
+    if(resume)applyAttempt(S,resume);
     event(S,replay?'replay':'level',{level:n,from:previous});
     return S;
   }
@@ -108,8 +186,8 @@
     if (S.hint.id===o.id) { S.hint.id=''; S.hint.until=-1; }
     const next=nextMissing(S); if(next)S.focus=next.face;
     if (S.count===S.total) {
-      S.mode='win'; S.wonAt=S.t; S.progress.completed[S.level]=true; S.revision++;
-      event(S,'win',{level:S.level,x:VIEW.W/2,y:VIEW.H/2});
+      S.mode='win'; S.wonAt=S.t;award(S);S.revision++;
+      event(S,'win',{level:S.level,reward:S.reward.id,first:S.reward.first,x:VIEW.W/2,y:VIEW.H/2});
     }
     return true;
   }
@@ -180,24 +258,39 @@
     S.ev=S.ev.filter((e)=>S.t-e.t<8).slice(-64);
     return S;
   }
-  // Serialisable local-only progress. No main-game inventory, scores or rewards.
+  // Local workshop collection only; the main Godot profile is separate.
   function encodeSave(S) {
-    return JSON.stringify({version:VERSION,level:S.level,found:Object.keys(S.found),completed:S.progress.completed,
+    return JSON.stringify({version:VERSION,level:S.level,found:Object.keys(S.found),completed:S.progress.completed,claimed:S.progress.claimed,selected:S.progress.selected,attempts:savedAttempts(S),
       hintRemaining:hintRemaining(S),hintUses:S.hintUses});
   }
   function restoreSave(raw,worldT=0) {
     let data;
     try { data=typeof raw==='string'?JSON.parse(raw):raw; } catch (_) {return spawn(worldT);}
-    if(!data || typeof data!=='object' || data.version!==VERSION || !Number.isInteger(data.level) || data.level<0 || data.level>=LEVELS.length) return spawn(worldT);
-    const S=create(data.level); S.wt0=Number.isFinite(worldT)?worldT:0;
+    if(!data || typeof data!=='object' || ![1,VERSION].includes(data.version) || !Number.isInteger(data.level) || data.level<0 || data.level>=(data.version===1?3:LEVELS.length)) return spawn(worldT);
+    const completed=LEVELS.map((_,i)=>i<(data.version===1?3:LEVELS.length)&&Array.isArray(data.completed)&&data.completed[i]===true);
+    // A forged later completion cannot open a gap in the sequential extension.
+    for(let i=3;i<completed.length;i++)if(!completed[i-1])completed[i]=false;
+    let number=data.level;
+    if(number>=3&&!completed[number-1])number=completed.findIndex((done,i)=>i>=2&&!done);
+    if(number<0)number=0;
+    const S=create(number); S.wt0=Number.isFinite(worldT)?worldT:0;
+    S.progress.completed=completed;
+    S.progress.claimed=completed.slice();
+    const attempts=data.version===VERSION&&data.attempts&&typeof data.attempts==='object'&&!Array.isArray(data.attempts)?data.attempts:{};
+    for(let i=0;i<LEVELS.length;i++)if(!completed[i]&&levelUnlocked(S,i)&&has(attempts,String(i))) {
+      const attempt=cleanAttempt(i,attempts[i]);if(attempt)S.progress.attempts[i]=attempt;
+    }
     const valid=new Set(items(S).filter((o)=>o.target).map((o)=>o.id));
-    for(const id of Array.isArray(data.found)?data.found:[]) if(typeof id==='string'&&valid.has(id))S.found[id]=-1;
+    for(const id of number===data.level&&Array.isArray(data.found)?data.found:[]) if(typeof id==='string'&&valid.has(id))S.found[id]=-1;
     S.count=foundCount(S);
-    S.progress.completed=LEVELS.map((_,i)=>Array.isArray(data.completed)&&data.completed[i]===true);
-    if(S.count===S.total) {S.mode='win';S.wonAt=-1;S.progress.completed[S.level]=true;}
+    if(S.count===S.total) {S.mode='win';S.wonAt=-1;award(S);S.reward.first=false;}
+    S.progress.selected=typeof data.selected==='string'&&TROPHIES.some((o)=>o.id===data.selected&&S.progress.claimed[o.level-1])?data.selected:null;
     const next=nextMissing(S); if(next)S.focus=next.face;
     S.hint.readyAt=typeof data.hintRemaining==='number'&&Number.isFinite(data.hintRemaining)?clamp(data.hintRemaining,0,HINT_COOLDOWN):0;
     S.hintUses=Number.isInteger(data.hintUses)?clamp(data.hintUses,0,99999):0;
+    if(number!==data.level)applyAttempt(S,S.progress.attempts[number]);
+    if(S.mode==='play'&&!S.progress.completed[S.level])S.progress.attempts[S.level]=attemptSnapshot(S);
+    else delete S.progress.attempts[S.level];
     return S;
   }
   const ROUTE = LEVELS[0].targets.map((face,i)=>({t:2.1+i*2.35,item:LEVELS[0].items.find((o)=>o.face===face)}));
@@ -222,10 +315,11 @@
     return Object.assign(clone(cache.S),{loop,q});
   }
   function namedState(name='play') {
-    const number=name==='level2'?1:name==='level3'||name==='win12'?2:0,S=create(number);
+    const number=/^level[2-6]$/.test(name)?Number(name.slice(5))-1:name==='win12'?2:name==='winlast'?5:0,S=create(number);
+    if(number>=3)for(let i=2;i<number;i++){S.progress.completed[i]=true;S.progress.claimed[i]=true;}
     for(let i=0;i<120;i++)step(S,{});
-    if(['finds','hint','cooldown','win','win12'].includes(name)) {
-      const n=name==='win'||name==='win12'?S.total:3;
+    if(['finds','hint','cooldown','win','win12','winlast'].includes(name)) {
+      const n=name==='win'||name==='win12'||name==='winlast'?S.total:3;
       for(const face of layout(S).targets.slice(0,n)) {const o=items(S).find((o)=>o.face===face);step(S,{px:o.x,py:o.y,tap:true,room:true});}
     }
     if(name==='hint'||name==='cooldown')useHint(S);
@@ -240,8 +334,9 @@
     const failures=[];
     LEVELS.forEach((def,i)=>{
       if(def.items.length!==12||new Set(def.items.map((o)=>o.face)).size!==12)failures.push('Level '+(i+1)+' must contain exactly twelve distinct toys');
-      if(def.targets.length!==(i===2?12:8)||new Set(def.targets).size!==def.targets.length)failures.push('Level '+(i+1)+' target count/uniqueness');
+      if(def.targets.length!==[8,8,12,8,10,12][i]||new Set(def.targets).size!==def.targets.length)failures.push('Level '+(i+1)+' target count/uniqueness');
       const S=create(i);
+      if(i>=3)for(let previous=2;previous<i;previous++){S.progress.completed[previous]=true;S.progress.claimed[previous]=true;}
       for(const o of def.items) {
         if(!FACES[o.face]||o.w<80||o.h<88||o.x-o.w/2<4||o.x+o.w/2>WORLD.W-4||o.y-o.h/2<0||o.y+o.h/2>WORLD.H)failures.push(o.id+' invalid bounds or finger target');
         if(Math.abs(o.w/o.h-RECTS[o.face][2]/RECTS[o.face][3])>1e-9)failures.push(o.id+' sprite aspect changed');
@@ -257,8 +352,8 @@
     return failures;
   }
   root.SIM={DT,L,VIEW,WORLD,SOURCE,ALPHA,HINT:'Найди в комнате игрушки с нижней панели. Образец выбирает предмет для подсказки. Enter — подсказка, F — во весь экран, R — начать заново.',
-    SAVE_KEY,VERSION,FACES,FACE_IDS,FACE_NAMES,RECTS,LEVELS,UI,HINT_COOLDOWN,HINT_REVEAL,TAP_SLOP,ROUTE,
+    SAVE_KEY,VERSION,FACES,FACE_IDS,FACE_NAMES,RECTS,LEVELS,TROPHIES,UI,HINT_COOLDOWN,HINT_REVEAL,TAP_SLOP,ROUTE,
     create,spawn,step,at,scriptInput,layout,items,clueSlots,hitTest,isFound,foundCount,nextMissing,hintRemaining,useHint,
-    tap,find,startLevel,encodeSave,restoreSave,namedState,demoCheck,selfCheck,outOfPlay:()=>false};
+    tap,find,startLevel,levelUnlocked,collection,selectTrophy,interactTrophy,encodeSave,restoreSave,namedState,demoCheck,selfCheck,outOfPlay:()=>false};
   if(typeof module!=='undefined')module.exports=root.SIM;
 })(typeof window!=='undefined'?window:globalThis);

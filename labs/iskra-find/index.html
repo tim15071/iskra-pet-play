@@ -86,7 +86,7 @@ window.toggleGameFullscreen=async()=>{
     return true;
   }catch(_){showNotice('Не удалось включить полный экран. Можно продолжить играть.');return false;}
 };
-const WATCH=['index.html','scene.js','sim.js','lib.js','gl.js','assets.js','sizes.js','iskra-rig.js','audio.js'];
+const WATCH=['index.html','scene.js','sim.js','journey.js','lib.js','gl.js','assets.js','sizes.js','iskra-rig.js','audio.js'];
 function showError(error){
   if(!window.__renderErr){window.__renderErr=error;console.error(error);}
   failed=true;loading.hidden=true;errorPanel.hidden=false;canvas.setAttribute('aria-busy','false');
@@ -136,7 +136,7 @@ function watchSources(){
 (async()=>{
   for(const name of ['assets.js','sizes.js','gl.js','lib.js','sim.js','iskra-rig.js'])await loadScript(name);
   await loadOptionalScript('rig-config.js');
-  for(const name of ['scene.js','audio.js'])await loadScript(name);
+  for(const name of ['scene.js','audio.js','journey.js'])await loadScript(name);
   const bounds=measureViewport(),W=bounds.height>bounds.width?1080:1920;
   const view=window.ISKRA_VIEW=renderMode?{...SIM.VIEW}:{W,H:Math.round(W*bounds.ratio)};
   fitCanvas(view,bounds);
@@ -162,6 +162,7 @@ function watchSources(){
   const releaseCapture=(id)=>{try{if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);}catch(_){}};
   const cancelGesture=()=>{if(gesture){const id=gesture.id;gesture=null;releaseCapture(id);}};
   const clearInput=()=>{Object.keys(keys).forEach((key)=>delete keys[key]);taps.length=0;cancelGesture();};
+  const journey=JOURNEY.init({state:()=>play,save:()=>saveProgress(),clearInput,notice:showNotice});
   const updateGesture=(event)=>{
     if(!gesture||gesture.id!==event.pointerId)return;
     const dx=event.clientX-gesture.x,dy=event.clientY-gesture.y;
@@ -185,6 +186,7 @@ function watchSources(){
     updateGesture(event);const finished=gesture;gesture=null;releaseCapture(event.pointerId);
     if(finished.dragged)return;
     const{mapped}=mappedPointer(event);rememberPointer(mapped);
+    if(mapped.trophy){SIM.interactTrophy(play);return;}
     if(mapped.fullscreen){window.toggleGameFullscreen();return;}
     if(mapped.pan){setCamera(SCENE.layout().camera+mapped.pan*400);return;}
     if(!mapped.blocked&&Number.isFinite(mapped.px)&&Number.isFinite(mapped.py))taps.push({x:mapped.px,y:mapped.py,room:!!mapped.room});
@@ -194,6 +196,7 @@ function watchSources(){
   canvas.addEventListener('contextmenu',(event)=>event.preventDefault());
   const handledKeys=new Set(['ArrowLeft','ArrowRight','ArrowUp','ArrowDown','KeyA','KeyD','KeyW','KeyS','Enter','Space','KeyX','KeyJ']);
   addEventListener('keydown',(event)=>{
+    if(journey.isOpen())return;
     if(event.ctrlKey||event.metaKey||event.altKey||event.target?.closest?.('button,input,textarea,select'))return;
     if(event.code==='KeyF'){event.preventDefault();if(!event.repeat)window.toggleGameFullscreen();return;}
     if(event.code==='KeyR'){event.preventDefault();if(!event.repeat){clearInput();SIM.startLevel(play,play.level,true);SCENE.cameraX=960;saveProgress();}return;}
@@ -243,7 +246,7 @@ function watchSources(){
     try{
     const wall=Math.max(0,Math.min(.1,(now-last)/1000));last=now;
     fpsElapsed+=wall;fpsFrames++;if(fpsElapsed>.5){fps=fpsFrames/fpsElapsed;fpsElapsed=0;fpsFrames=0;window.__fps=fps;}
-    if(!document.hidden)acc+=wall;
+    if(!document.hidden&&!journey.isOpen())acc+=wall;
     while(acc>=SIM.DT){
       const tap=taps.shift(),input={left:keys.ArrowLeft||keys.KeyA,right:keys.ArrowRight||keys.KeyD,up:keys.ArrowUp||keys.KeyW,down:keys.ArrowDown||keys.KeyS,
         act:keys.Enter||keys.KeyX||keys.KeyJ,jump:keys.Space,px:tap?tap.x:pointer.x,py:tap?tap.y:pointer.y,room:tap?!!tap.room:!!pointer.room,press:false,tap:!!tap};
@@ -252,6 +255,7 @@ function watchSources(){
     SCENE.state=play;window.__play=play;
     if(play.revision!==savedRevision){savedRevision=play.revision;saveProgress();announce();}
     SCENE.render(play.wt0+play.t);
+    journey.update();
     if(debug)dev.textContent='ИГРА  '+fps.toFixed(0)+' fps  ·  '+view.W+' × '+view.H+'  ·  камера '+Math.round(SCENE.layout().camera);
     }catch(error){saveProgress();showError(error);return;}
     requestAnimationFrame(frame);

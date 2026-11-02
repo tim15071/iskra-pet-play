@@ -32,7 +32,8 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
       fullscreen:portrait?{x:W-138,y:136,w:112,h:112}:{x:W-820,y:12,w:96,h:72}};
   };
   const expanded=(r,n)=>({x:r.x-(Math.max(n,r.w)-r.w)/2,y:r.y-(Math.max(n,r.h)-r.h)/2,w:Math.max(n,r.w),h:Math.max(n,r.h)});
-  const GF=[0,1,2,5,6,7,8,9,10,11],orders=[[0,1,6,7,2,5,8,9,3,4],[5,0,1,6,9,3,4,2,7,8],[2,7,9,0,4,6,1,8,5,3]];
+  const GF=[0,1,2,5,6,7,8,9,10,11],orders=[[0,1,6,7,2,5,8,9,3,4],[5,0,1,6,9,3,4,2,7,8],[2,7,9,0,4,6,1,8,5,3],
+    [8,3,0,9,5,1,7,4,2,6],[6,8,4,2,7,0,3,9,1,5],[4,6,3,5,0,9,2,7,8,1]];
   S.itemPlacements = (ST=state()) => {
     const a=S.layout(ST),src=SIM.SOURCE.scale;
     const ground=a.portrait?[[85,259],[215,274],[65,503],[276,503],[170,503],[.56,690],[.76,710],[.91,710],[.56,830],[.83,830]]:
@@ -66,8 +67,12 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
     if(p)return [p.x,p.y];const a=S.layout();return [a.originX+x*a.scale,a.originY+y*a.scale];
   };
   S.guide = (ST=state()) => {
-    const a=S.layout(ST),height=a.H*.26,scale=height/380,x=24+height*.47,y=a.footerY-20;
-    return {x,y,scale,box:[16,y-height*1.04,height*.80,height*1.08],height};
+    const a=S.layout(ST),height=a.H*(a.narrow?.22:.26),scale=height/380,x=24+height*.47,y=a.footerY-20;
+    return {x,y,scale,box:[16,y-height*1.04,height*.80+148,height*1.08],height};
+  };
+  S.trophy = (ST=state()) => {
+    const p=S.guide(ST),size=118,x=p.box[0]+p.box[2]-72,y=p.y-84;
+    return {x,y,w:size,h:size,hit:{x:x-66,y:y-66,w:132,h:142}};
   };
   S.clues = (ST=state()) => {
     const a=S.layout(ST),target=SIM.layout(ST).targets,cols=a.portrait?(a.narrow?4:target.length>8?6:4):target.length;
@@ -91,6 +96,7 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
       const b=S.winButtons();for(const key of ['replay','next'])if(inBox(x,y,expanded(b[key],a.portrait?122:104)))return Object.assign(centre(SIM.UI[key]),{hud:key});
       return {blocked:true};
     }
+    if(SIM.collection && SIM.collection(ST).some(o=>o.selected) && inBox(x,y,S.trophy(ST).hit))return {trophy:true};
     if(inBox(x,y,expanded(a.fullscreen,a.portrait?122:104)))return {fullscreen:true};
     for(const key of ['hint','restart'])if(inBox(x,y,expanded(a[key],a.portrait?122:104)))return Object.assign(centre(SIM.UI[key]),{hud:key});
     const clue=S.clues(ST).find((r)=>inBox(x,y,r.hit));
@@ -198,6 +204,19 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
       const p=S.guide(),gaze=S.toScreen(ST.x,ST.y,ST),rigState=Object.assign({},ST,{rigTarget:gaze});
       L.shadow(p.x,p.y+3*k,84*k,16*k,.30);window.ISKRA_RIG.draw(rigState,ST.t,p.x,p.y,p.scale);
     }
+    const selected=SIM.collection&&SIM.collection(ST).find(o=>o.selected);
+    if(selected) {
+      const p=S.trophy(ST),last=(ST.ev||[]).filter(e=>e.k==='trophy').at(-1),age=last?ST.t-last.t:99;
+      L.shadow(p.x,p.y+62,66,11,.26);
+      L.rrect(p.x-63,p.y+38,126,28,14,[.65,.38,.12],[.94,.70,.30]);
+      L.rrect(p.x-63,p.y+31,126,18,12,[1,.88,.53],[1,.75,.29]);
+      const r=SIM.FACES[selected.face].rect,s=Math.min(108/r[2],112/r[3]);
+      toy(selected.face,p.x,p.y-12,r[2]*s,r[3]*s);
+      const label={x:p.x-72,y:p.y+57,w:144,h:42};
+      L.rrect(label.x,label.y,label.w,label.h,14,C.cream,C.cream,.9);L.uiBox('trophy_label',label.x,label.y,label.w,label.h,4);
+      text('trophy_name','Мой приз',p.x,label.y+21,136,a.narrow?32:26);
+      if(age<1)for(let i=0;i<7;i++){const q=age,ang=i*Math.PI*2/7;L.star(p.x+Math.cos(ang)*(32+q*60),p.y-12+Math.sin(ang)*(32+q*60),8*(1-q),[1,.93,.55],1-q);}
+    }
     clipRoom(a,false);
     // The supplied room already contains its finished light and colour grade.
     // A single copy preserves that artwork and avoids six unused bloom passes.
@@ -205,7 +224,7 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
   }
   function drawHeader(ST,a) {
     panel('header_title',a.title,C.paper,false,12);
-    text('title',a.portrait?'Найди игрушки':'Мастерская находок',32,a.portrait?43:37,a.title.w-32,a.portrait?35:37,{al:0});
+    text('title','Карта находок  ›',32,a.portrait?43:37,a.title.w-32,a.portrait?35:37,{al:0});
     text('level_title',a.portrait?'Уровень '+(ST.level+1)+'  ·  Найдено '+ST.count+' / '+ST.total:'Уровень '+(ST.level+1)+'  ·  '+SIM.layout(ST).name,32,a.portrait?83:68,a.title.w-32,a.narrow?34:a.portrait?25:20,{al:0,col:'#35695f',weight:'800'});
     if(!a.portrait) {
       panel('count_panel',a.count,[.88,.94,.82],false,8);
@@ -250,12 +269,13 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
     const r={x:a.W/2-(a.portrait?480:540),y:a.H/2-(a.portrait?330:280),w:a.portrait?960:1080,h:a.portrait?660:560};
     panel('win_panel',r,C.cream,true,24);
     L.rrect(r.x+16,r.y+16,r.w-32,11,5,C.gold,C.gold);
-    toy(10,a.W/2,r.y+107,110,90,0);
+    const reward=SIM.TROPHIES&&SIM.TROPHIES[ST.level];
+    toy(reward?reward.face:10,a.W/2,r.y+107,110,90,0);
     text('win_title','Все игрушки найдены!',a.W/2,r.y+205,r.w-100,56,{col:'#1c6261'});
     text('win_subtitle',SIM.layout(ST).name,a.W/2,r.y+266,r.w-100,31,{col:'#61836d',weight:'800'});
-    text('win_count',ST.count+' из '+ST.total+'  —  отлично!',a.W/2,r.y+331,r.w-100,40,{col:'#926219'});
+    text('win_count',reward?(ST.reward&&ST.reward.first?'Новый приз: ':'В коллекции: ')+reward.name:ST.count+' из '+ST.total+'  —  отлично!',a.W/2,r.y+331,r.w-100,40,{col:'#926219'});
     const b=S.winButtons();button('win_replay',b.replay,'Ещё раз',{quiet:true,size:33});
-    button('win_next',b.next,ST.level<2?'Следующий уровень':'Играть сначала',{gold:true,size:ST.level<2?29:31});
+    button('win_next',b.next,ST.level<SIM.LEVELS.length-1?'Следующий поиск':'Играть сначала',{gold:true,size:31});
     const age=ST.wonAt>=0?ST.t-ST.wonAt:99;
     if(age<2.4)for(let i=0;i<36;i++) {
       const u=age/2.4,seed=L.rnd(i,2),x=a.W/2+(seed-.5)*r.w*1.2*(.2+u),y=r.y+130+(L.rnd(i,7)-.5)*220-age*95+age*age*68;
@@ -268,8 +288,9 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
     if(ST.mode==='win')drawWin(ST,a);
   };
   S.QA = () => {
-    const names=['match','play','finds','hint','cooldown','level2','level3','win','win12','drag'];
+    const names=['match','play','finds','hint','cooldown','level2','level3','level4','level5','level6','win','win12','winlast','drag'];
     const states=names.map((n)=>[n,SIM.namedState(n)]),base=SIM.namedState('play');
+    if(SIM.TROPHIES){const placed=SIM.namedState('play');placed.progress.completed[0]=true;placed.progress.claimed[0]=true;SIM.selectTrophy(placed,SIM.TROPHIES[0].id);states.push(['trophy',placed]);}
     const loop=window.ISKRA_RIG?window.ISKRA_RIG.qaLoop(base):[];
     return {states,cycles:{},loops:loop.length?{iskra_idle:loop}:{},subject:{iskra_idle:'iskra'},actors:loop.length?['iskra']:[],
       sprites:{iskra_idle:window.ISKRA_RIG?window.ISKRA_RIG.textures:[]},
