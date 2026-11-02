@@ -11,6 +11,7 @@
   const centre = (r)=>({px:r.x+r.w/2,py:r.y+r.h/2});
   const view = ()=>window.ISKRA_VIEW || SIM.VIEW;
   const state = ()=>S.state || SIM.at(0);
+  S.toyFit=(face,maxW,maxH)=>{const r=SIM.FACES[face].rect,k=Math.min(maxW/r[2],maxH/r[3]);return{w:r[2]*k,h:r[3]*k};};
   const UI_ALPHA = 1;
   const HINT_VEIL = `uniform vec2 u_at; uniform float u_r,u_a;
 void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a;o=vec4(vec3(.035,.12,.13)*a,a); }`;
@@ -22,9 +23,11 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
   };
   S.layout = (ST=state()) => {
     const {W,H}=view(),portrait=H>W,narrow=H/W>1.7,footerH=portrait?(narrow&&SIM.layout(ST).targets.length>8?370:260):144,headerH=portrait?128:96;
-    const scale=Math.max(W/SIM.WORLD.W,H/SIM.WORLD.H),originX=portrait?0:(W-SIM.WORLD.W*scale)/2,originY=(H-SIM.WORLD.H*scale)/2;
+    const garden=SIM.room(ST).id==='garden',scale=Math.max(W/SIM.WORLD.W,H/SIM.WORLD.H)*(garden&&portrait?1.55:1);
+    const originX=garden?(W-SIM.WORLD.W*scale)/2:portrait?0:(W-SIM.WORLD.W*scale)/2;
+    const originY=garden?(portrait?H-SIM.WORLD.H*scale:clamp(H*.30-600*SIM.SOURCE.scale*scale,H-SIM.WORLD.H*scale,0)):(H-SIM.WORLD.H*scale)/2;
     return {W,H,portrait,narrow,footerH,headerH,footerY:H-footerH,room:{x:0,y:0,w:W,h:H},frame:{x:0,y:0,w:W,h:H},
-      scale,originX,originY,camMin:960,camMax:960,camera:960,
+      scale,originX,originY,garden,camMin:960,camMax:960,camera:960,
       title:{x:16,y:12,w:portrait?590:740,h:portrait?100:72},
       hint:portrait?{x:W-320,y:16,w:288,h:88}:{x:W-270,y:12,w:244,h:72},
       restart:portrait?{x:W-432,y:16,w:96,h:88}:{x:W-470,y:12,w:174,h:72},
@@ -36,6 +39,7 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
     [8,3,0,9,5,1,7,4,2,6],[6,8,4,2,7,0,3,9,1,5],[4,6,3,5,0,9,2,7,8,1]];
   S.itemPlacements = (ST=state()) => {
     const a=S.layout(ST),src=SIM.SOURCE.scale;
+    if(a.garden)return S.gardenPlacements(ST,a);
     const ground=a.portrait?[[85,259],[215,274],[65,503],[276,503],[170,503],[.56,690],[.76,710],[.91,710],[.56,830],[.83,830]]:
       [[65,503],[276,503],[166,599],[1250,507],[1382,634],[1380,507],[520,722],[740,758],[930,758],[1110,740]];
     return SIM.items(ST).map(item=>{
@@ -62,12 +66,34 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
       return p;
     });
   };
+  const gardenOrders=[[0,1,2,3,4,5,6,7,8,9,10,11],[7,0,9,2,11,4,1,10,3,8,5,6],
+    [10,5,0,8,3,11,7,1,9,4,6,2],[2,8,6,0,10,3,5,9,1,11,4,7],
+    [4,11,8,5,1,7,10,3,6,0,2,9],[9,3,7,11,6,2,4,0,8,5,1,10]];
+  S.gardenPlacements = (ST,a) => {
+    const guide=S.guide(ST),order=gardenOrders[ST.level-6],positions=[];
+    const maxW=a.portrait?(a.narrow?112:132):150,maxH=a.portrait?150:146;
+    if(a.portrait){
+      const row2=guide.box[1]-91,row1=row2-(a.narrow?250:185);
+      for(let row=0;row<2;row++)for(let col=0;col<4;col++)positions.push([100+col*(a.W-200)/3,row?row2:row1]);
+      const width=Math.max(122,maxW),left=guide.box[0]+guide.box[2]+14+width/2,right=a.W-14-width/2;
+      for(let col=0;col<4;col++)positions.push([left+col*(right-left)/3,a.footerY-100]);
+    }else{
+      const left=guide.box[0]+guide.box[2]+100,right=a.W-100;
+      const lower=a.footerY-86,upper=lower-178;
+      for(let row=0;row<2;row++)for(let col=0;col<6;col++)positions.push([left+col*(right-left)/5,row?lower:upper]);
+    }
+    return SIM.items(ST).map(item=>{
+      const slot=order[item.face-12],[x,y]=positions[slot],scale=Math.min(maxW/item.w,maxH/item.h),w=item.w*scale,h=item.h*scale;
+      return{item,x,y,w,h,rot:0,slot,hanging:false,contact:{x,y:y+(SIM.ALPHA[item.face][3]/SIM.RECTS[item.face][3]-.5)*h},cord:null,
+        hit:expanded({x:x-w/2,y:y-h/2,w,h},a.portrait?122:104)};
+    });
+  };
   S.toScreen = (x,y,ST=state()) => {
     const p=S.itemPlacements(ST).find(p=>Math.abs(p.item.x-x)<.001&&Math.abs(p.item.y-y)<.001);
     if(p)return [p.x,p.y];const a=S.layout();return [a.originX+x*a.scale,a.originY+y*a.scale];
   };
   S.guide = (ST=state()) => {
-    const a=S.layout(ST),height=a.H*(a.narrow?.22:.26),scale=height/380,x=24+height*.47,y=a.footerY-20;
+    const a=S.layout(ST),height=a.H*(a.narrow?(a.garden?.20:.22):.26),scale=height/380,x=24+height*.47,y=a.footerY-20;
     return {x,y,scale,box:[16,y-height*1.04,height*.80+148,height*1.08],height};
   };
   S.trophy = (ST=state()) => {
@@ -153,8 +179,8 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
     L.solid(x-28,y-23,22,7,C.teal,1.65);
   }
   function toy(face,x,y,w,h,rot=0,alpha=1,opts={}) {
-    const r=SIM.FACES[face].rect,tx=G.tex('toys'),src=[r[0]/tx.w,r[1]/tx.h,(r[0]+r[2])/tx.w,(r[1]+r[3])/tx.h];
-    L.sprite('toys',0,0,{m:M.of(M.t(x,y),M.r(rot)),pivot:[w/2,h/2],w,h,src,u:Object.assign({alpha},opts)});
+    const def=SIM.FACES[face],name=def.texture||'toys',r=def.rect,tx=G.tex(name),src=[r[0]/tx.w,r[1]/tx.h,(r[0]+r[2])/tx.w,(r[1]+r[3])/tx.h];
+    L.sprite(name,0,0,{m:M.of(M.t(x,y),M.r(rot)),pivot:[w/2,h/2],w,h,src,u:Object.assign({alpha},opts)});
   }
   function clipRoom(a,on) {
     const gl=G.gl;
@@ -164,7 +190,7 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
   function drawRoom(ST,t,a) {
     const R=a.room,k=a.scale;
     clipRoom(a,true);
-    L.sprite('workshop',a.originX,a.originY,{w:SIM.WORLD.W*k,h:SIM.WORLD.H*k});
+    L.sprite(SIM.room(ST).texture,a.originX,a.originY,{w:SIM.WORLD.W*k,h:SIM.WORLD.H*k});
     clipRoom(a,false);
     L.beginComp();clipRoom(a,true);
     for(const p of S.itemPlacements(ST)) {
@@ -260,7 +286,7 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
       if(!SIM.isFound(ST,o))continue;const age=ST.t-ST.found[o.id];if(age<0||age>.8)continue;
       const q=smooth(age/.8),p=S.toScreen(o.x,o.y,ST),slot=S.clues(ST).find((r)=>r.face===o.face);if(!slot)continue;
       const tx=slot.x+slot.w/2,ty=slot.y+44,x=p[0]+(tx-p[0])*q,y=p[1]+(ty-p[1])*q-Math.sin(q*Math.PI)*110;
-      const placed=S.itemPlacements(ST).find(p=>p.item.id===o.id),w=placed.w+(74-placed.w)*q,h=placed.h+(74-placed.h)*q;
+      const placed=S.itemPlacements(ST).find(p=>p.item.id===o.id),icon=S.toyFit(o.face,74,74),w=placed.w+(icon.w-placed.w)*q,h=placed.h+(icon.h-placed.h)*q;
       toy(o.face,x,y,w,h,o.rot*(1-q),1-.2*q);
     }
   }
@@ -270,8 +296,9 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
     panel('win_panel',r,C.cream,true,24);
     L.rrect(r.x+16,r.y+16,r.w-32,11,5,C.gold,C.gold);
     const reward=SIM.TROPHIES&&SIM.TROPHIES[ST.level];
-    toy(reward?reward.face:10,a.W/2,r.y+107,110,90,0);
-    text('win_title','Все игрушки найдены!',a.W/2,r.y+205,r.w-100,56,{col:'#1c6261'});
+    const face=reward?reward.face:10,icon=S.toyFit(face,110,110);
+    toy(face,a.W/2,r.y+107,icon.w,icon.h,0);
+    text('win_title','Все предметы найдены!',a.W/2,r.y+205,r.w-100,56,{col:'#1c6261'});
     text('win_subtitle',SIM.layout(ST).name,a.W/2,r.y+266,r.w-100,31,{col:'#61836d',weight:'800'});
     text('win_count',reward?(ST.reward&&ST.reward.first?'Новый приз: ':'В коллекции: ')+reward.name:ST.count+' из '+ST.total+'  —  отлично!',a.W/2,r.y+331,r.w-100,40,{col:'#926219'});
     const b=S.winButtons();button('win_replay',b.replay,'Ещё раз',{quiet:true,size:33});
@@ -288,9 +315,10 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
     if(ST.mode==='win')drawWin(ST,a);
   };
   S.QA = () => {
-    const names=['match','play','finds','hint','cooldown','level2','level3','level4','level5','level6','win','win12','winlast','drag'];
+    const names=['match','play','finds','hint','cooldown','level2','level3','level4','level5','level6','garden','gardenhint','gardenwin','win','win12','winlast','drag'];
     const states=names.map((n)=>[n,SIM.namedState(n)]),base=SIM.namedState('play');
     if(SIM.TROPHIES){const placed=SIM.namedState('play');placed.progress.completed[0]=true;placed.progress.claimed[0]=true;SIM.selectTrophy(placed,SIM.TROPHIES[0].id);states.push(['trophy',placed]);}
+    {const placed=SIM.namedState('garden');placed.progress.completed[6]=true;placed.progress.claimed[6]=true;SIM.selectTrophy(placed,SIM.TROPHIES[6].id);states.push(['gardenprize',placed]);}
     const loop=window.ISKRA_RIG?window.ISKRA_RIG.qaLoop(base):[];
     return {states,cycles:{},loops:loop.length?{iskra_idle:loop}:{},subject:{iskra_idle:'iskra'},actors:loop.length?['iskra']:[],
       sprites:{iskra_idle:window.ISKRA_RIG?window.ISKRA_RIG.textures:[]},

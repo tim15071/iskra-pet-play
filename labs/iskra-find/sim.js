@@ -3,18 +3,31 @@
 (function (root) {
   'use strict';
   const DT = 1 / 120, L = 25, VIEW = { W: 1920, H: 1080 }, WORLD = { W: 1920, H: 1440 };
-  // Keep the original storage key: v2 upgrades the first trial in place.
-  const SAVE_KEY = 'iskra-ref2game-find-v1', VERSION = 2;
+  // Keep the original storage key: each schema extends the same local journey.
+  const SAVE_KEY = 'iskra-ref2game-find-v1', VERSION = 3;
   const HINT_COOLDOWN = 8, HINT_REVEAL = 3.2, TAP_SLOP = 22;
-  const FACE_IDS = ['rocket', 'duck', 'dinosaur', 'star', 'airplane', 'candy', 'top', 'strawberry', 'ball', 'shell', 'crown', 'gamepad'];
-  const FACE_NAMES = ['Ракета', 'Уточка', 'Динозаврик', 'Звёздочка', 'Самолётик', 'Конфета', 'Юла', 'Клубника', 'Мяч', 'Ракушка', 'Корона', 'Геймпад'];
+  const FACE_IDS = ['rocket', 'duck', 'dinosaur', 'star', 'airplane', 'candy', 'top', 'strawberry', 'ball', 'shell', 'crown', 'gamepad',
+    'wateringcan','flowerpot','butterfly','ladybug','mushroom','sunflower','acorn','pear','leaf','seedbag','lantern','pinwheel'];
+  const FACE_NAMES = ['Ракета', 'Уточка', 'Динозаврик', 'Звёздочка', 'Самолётик', 'Конфета', 'Юла', 'Клубника', 'Мяч', 'Ракушка', 'Корона', 'Геймпад',
+    'Лейка','Цветок','Бабочка','Жучок','Грибочек','Подсолнух','Жёлудь','Груша','Листочек','Семена','Фонарик','Вертушка'];
   // Exact custom crops from the existing Godot toy atlas, not equal grid cells.
   const RECTS = [[46,40,300,334],[410,70,295,305],[731,57,356,319],[1116,70,307,302],[30,428,354,276],[392,430,365,252],[782,396,296,318],[1138,400,270,308],[40,732,302,298],[392,740,314,286],[736,734,348,286],[1088,770,344,260]];
-  const FACES = FACE_IDS.map((id, i) => ({ id, name: FACE_NAMES[i], rect: RECTS[i] }));
+  // Production alpha components, including each prop's full soft edge.
+  RECTS.push([30,26,330,301],[443,7,266,326],[785,54,344,251],[1179,53,320,259],
+    [46,358,297,295],[428,346,276,312],[829,348,256,302],[1207,345,271,310],
+    [39,686,308,307],[422,683,285,314],[836,683,237,319],[1182,675,292,329]);
+  const FACES = FACE_IDS.map((id, i) => ({ id, name: FACE_NAMES[i], rect: RECTS[i],texture:i<12?'toys':'garden-toys' }));
   const SOURCE = { W: 1448, H: 1086, scale: WORLD.W / 1448 };
   // Alpha bounds measured at A>150 in unchanged custom atlas crops. The visible
   // base meets a source-painting support; transparent crop edges do not float.
   const ALPHA = [[9,21,288,321],[13,13,282,296],[9,10,347,309],[8,10,294,287],[7,13,345,260],[12,10,355,238],[12,9,278,302],[12,13,257,298],[9,8,292,287],[9,9,305,273],[8,10,340,273],[8,8,334,244]];
+  ALPHA.push([8,8,322,294],[8,7,259,319],[8,8,337,244],[8,7,313,251],
+    [8,8,289,288],[7,7,269,305],[8,8,249,295],[8,8,263,303],
+    [8,8,300,300],[8,7,278,306],[8,8,230,312],[8,8,284,322]);
+  const ROOMS = [
+    {id:'workshop',name:'Мастерская',texture:'workshop',start:0,end:6,faces:Array.from({length:12},(_,i)=>i)},
+    {id:'garden',name:'Сад облаков',texture:'garden',start:6,end:12,faces:Array.from({length:12},(_,i)=>i+12)}
+  ];
   // Row: face, source x/contact y, crop height, measured support. Hanging rows
   // use source centre y and an attachment y. Both axes share SOURCE.scale.
   const placed = (level, rows, targets) => rows.map(([face,sx,sy,sh,support,anchorY], i) => {
@@ -24,7 +37,7 @@
       source:{x:sx,y:sy,height:sh},contact:hanging?null:{x,y:sy*SOURCE.scale},
       cord:hanging?{from:[x,anchorY*SOURCE.scale],to:[x,y+(ALPHA[face][1]/RECTS[face][3]-.5)*h]}:null };
   });
-  const level = (n, name, subtitle, targets, rows) => ({ id: n, name, subtitle, targets, items: placed(n, rows, targets) });
+  const level = (n, name, subtitle, targets, rows,room='workshop') => ({ id: n, name, subtitle, targets, room,items: placed(n, rows, targets) });
   const LEVELS = [
     level(1, 'Тёплая мастерская', 'Найди 8 игрушек для Искры', [0,1,2,3,4,5,8,10], [
       [0,85,259,112,'upper-left-shelf'], [1,276,503,102,'left-worktop'], [2,565,735,98,'rug'],
@@ -60,13 +73,33 @@
     level(5,'Игрушечная экспедиция','Найди 10 любимых вещей',[0,1,2,3,4,6,7,8,10,11],remixRows(LEVELS[1],4)),
     level(6,'Сокровища Искры','Последний большой поиск: 12 игрушек',[0,1,2,3,4,5,6,7,8,9,10,11],remixRows(LEVELS[2],7))
   );
+  const gardenNames=['Первые ростки','Крылатые гости','Урожай на облаке','Вечерний фонарик','Цветочная тропа','Праздник в саду'];
+  const gardenTargets=[[12,13,14,15,16,17,19,22],[12,14,15,16,18,20,22,23],
+    [12,13,14,15,17,18,19,20,21,23],[12,13,15,16,17,18,19,20,21,22],
+    [12,13,14,15,16,17,18,19,20,21,22,23],[12,13,14,15,16,17,18,19,20,21,22,23]];
+  const gardenOrder=[0,1,2,3,4,5,6,7,8,9,10,11];
+  const gardenSpots=[[85,259],[276,503],[565,735],[440,328],[1208,385],[215,274],
+    [166,599],[1380,507],[740,758],[1040,746],[1250,507],[1382,634]];
+  for(let i=0;i<6;i++){
+    const rows=gardenOrder.map((_,slot)=>{
+      const face=12+(slot+i*5)%12,[sx,sy]=gardenSpots[slot];
+      return [face,sx,sy,90,'garden-support-'+slot];
+    });
+    LEVELS.push(level(i+7,gardenNames[i],'Найди '+gardenTargets[i].length+' сокровищ сада',gardenTargets[i],rows,'garden'));
+  }
   const TROPHIES = [
     {id:'rocket',name:'Ракета мечты',face:0,level:1},
     {id:'duck',name:'Солнечная уточка',face:1,level:2},
     {id:'dinosaur',name:'Друг-динозаврик',face:2,level:3},
     {id:'star',name:'Звезда открытий',face:3,level:4},
     {id:'crown',name:'Корона сыщика',face:10,level:5},
-    {id:'gamepad',name:'Геймпад чемпиона',face:11,level:6}
+    {id:'gamepad',name:'Геймпад чемпиона',face:11,level:6},
+    {id:'wateringcan',name:'Лейка роста',face:12,level:7},
+    {id:'flowerpot',name:'Цветок дружбы',face:13,level:8},
+    {id:'butterfly',name:'Облачная бабочка',face:14,level:9},
+    {id:'lantern',name:'Фонарик мечтателя',face:22,level:10},
+    {id:'sunflower',name:'Солнечный подсолнух',face:17,level:11},
+    {id:'pinwheel',name:'Вертушка ветра',face:23,level:12}
   ];
   const UI = {
     hint: { x: 1576, y: 36, w: 288, h: 90 },
@@ -78,12 +111,14 @@
   const clone = (v) => JSON.parse(JSON.stringify(v));
   const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
   const layout = (S) => LEVELS[clamp(S.level | 0, 0, LEVELS.length - 1)];
+  const room = (S) => ROOMS.find((o)=>o.id===layout(S).room);
   const items = (S) => layout(S).items;
   const inside = (x,y,r) => x >= r.x && y >= r.y && x <= r.x+r.w && y <= r.y+r.h;
   const has = (o,k) => Object.prototype.hasOwnProperty.call(o,k);
   const isFound = (S,item) => has(S.found, typeof item === 'string' ? item : item.id);
   const foundCount = (S) => items(S).filter((o) => o.target && isFound(S,o)).length;
   const levelUnlocked = (S,n) => Number.isInteger(n)&&n>=0&&n<LEVELS.length&&(n<3||S.progress.completed[n-1]===true);
+  const roomUnlocked = (S,id) => {const target=ROOMS.find((o)=>o.id===id);return !!target&&levelUnlocked(S,target.start);};
   const collection = (S) => TROPHIES.map((o)=>Object.assign({},o,{unlocked:S.progress.claimed[o.level-1]===true,selected:S.progress.selected===o.id}));
   function selectTrophy(S,id) {
     if(id!==null&&!TROPHIES.some((o)=>o.id===id&&S.progress.claimed[o.level-1]===true))return false;
@@ -266,8 +301,10 @@
   function restoreSave(raw,worldT=0) {
     let data;
     try { data=typeof raw==='string'?JSON.parse(raw):raw; } catch (_) {return spawn(worldT);}
-    if(!data || typeof data!=='object' || ![1,VERSION].includes(data.version) || !Number.isInteger(data.level) || data.level<0 || data.level>=(data.version===1?3:LEVELS.length)) return spawn(worldT);
-    const completed=LEVELS.map((_,i)=>i<(data.version===1?3:LEVELS.length)&&Array.isArray(data.completed)&&data.completed[i]===true);
+    if(!data || typeof data!=='object' || ![1,2,VERSION].includes(data.version))return spawn(worldT);
+    const oldLimit=data.version===1?3:data.version===2?6:LEVELS.length;
+    if(!Number.isInteger(data.level)||data.level<0||data.level>=oldLimit)return spawn(worldT);
+    const completed=LEVELS.map((_,i)=>i<oldLimit&&Array.isArray(data.completed)&&data.completed[i]===true);
     // A forged later completion cannot open a gap in the sequential extension.
     for(let i=3;i<completed.length;i++)if(!completed[i-1])completed[i]=false;
     let number=data.level;
@@ -276,8 +313,8 @@
     const S=create(number); S.wt0=Number.isFinite(worldT)?worldT:0;
     S.progress.completed=completed;
     S.progress.claimed=completed.slice();
-    const attempts=data.version===VERSION&&data.attempts&&typeof data.attempts==='object'&&!Array.isArray(data.attempts)?data.attempts:{};
-    for(let i=0;i<LEVELS.length;i++)if(!completed[i]&&levelUnlocked(S,i)&&has(attempts,String(i))) {
+    const attempts=data.version>=2&&data.attempts&&typeof data.attempts==='object'&&!Array.isArray(data.attempts)?data.attempts:{};
+    for(let i=0;i<oldLimit;i++)if(!completed[i]&&levelUnlocked(S,i)&&has(attempts,String(i))) {
       const attempt=cleanAttempt(i,attempts[i]);if(attempt)S.progress.attempts[i]=attempt;
     }
     const valid=new Set(items(S).filter((o)=>o.target).map((o)=>o.id));
@@ -315,14 +352,14 @@
     return Object.assign(clone(cache.S),{loop,q});
   }
   function namedState(name='play') {
-    const number=/^level[2-6]$/.test(name)?Number(name.slice(5))-1:name==='win12'?2:name==='winlast'?5:0,S=create(number);
+    const number=/^level(?:[2-9]|1[0-2])$/.test(name)?Number(name.slice(5))-1:name==='win12'?2:name==='winlast'?5:name==='garden'||name==='gardenhint'?6:name==='gardenwin'?11:0,S=create(number);
     if(number>=3)for(let i=2;i<number;i++){S.progress.completed[i]=true;S.progress.claimed[i]=true;}
     for(let i=0;i<120;i++)step(S,{});
-    if(['finds','hint','cooldown','win','win12','winlast'].includes(name)) {
-      const n=name==='win'||name==='win12'||name==='winlast'?S.total:3;
+    if(['finds','hint','cooldown','win','win12','winlast','gardenhint','gardenwin'].includes(name)) {
+      const n=name==='win'||name==='win12'||name==='winlast'||name==='gardenwin'?S.total:3;
       for(const face of layout(S).targets.slice(0,n)) {const o=items(S).find((o)=>o.face===face);step(S,{px:o.x,py:o.y,tap:true,room:true});}
     }
-    if(name==='hint'||name==='cooldown')useHint(S);
+    if(name==='hint'||name==='cooldown'||name==='gardenhint')useHint(S);
     if(name==='cooldown')for(let i=0;i<390;i++)step(S,{});
     if(name==='drag') {
       const o=items(S).find((o)=>o.target); step(S,{px:o.x,py:o.y,press:true,room:true});step(S,{px:o.x+100,py:o.y+50,press:true,room:true});
@@ -334,7 +371,9 @@
     const failures=[];
     LEVELS.forEach((def,i)=>{
       if(def.items.length!==12||new Set(def.items.map((o)=>o.face)).size!==12)failures.push('Level '+(i+1)+' must contain exactly twelve distinct toys');
-      if(def.targets.length!==[8,8,12,8,10,12][i]||new Set(def.targets).size!==def.targets.length)failures.push('Level '+(i+1)+' target count/uniqueness');
+      if(def.targets.length!==[8,8,12,8,10,12,8,8,10,10,12,12][i]||new Set(def.targets).size!==def.targets.length)failures.push('Level '+(i+1)+' target count/uniqueness');
+      if(!ROOMS.some((o)=>o.id===def.room&&i>=o.start&&i<o.end))failures.push('Level '+(i+1)+' invalid room range');
+      if(def.items.some((o)=>!room(create(i)).faces.includes(o.face)))failures.push('Level '+(i+1)+' mixed-room objects');
       const S=create(i);
       if(i>=3)for(let previous=2;previous<i;previous++){S.progress.completed[previous]=true;S.progress.claimed[previous]=true;}
       for(const o of def.items) {
@@ -351,9 +390,9 @@
     });
     return failures;
   }
-  root.SIM={DT,L,VIEW,WORLD,SOURCE,ALPHA,HINT:'Найди в комнате игрушки с нижней панели. Образец выбирает предмет для подсказки. Enter — подсказка, F — во весь экран, R — начать заново.',
-    SAVE_KEY,VERSION,FACES,FACE_IDS,FACE_NAMES,RECTS,LEVELS,TROPHIES,UI,HINT_COOLDOWN,HINT_REVEAL,TAP_SLOP,ROUTE,
+  root.SIM={DT,L,VIEW,WORLD,SOURCE,ALPHA,HINT:'Найди в комнате предметы с нижней панели. Образец выбирает предмет для подсказки. Enter — подсказка, F — во весь экран, R — начать заново.',
+    SAVE_KEY,VERSION,FACES,FACE_IDS,FACE_NAMES,RECTS,LEVELS,TROPHIES,ROOMS,UI,HINT_COOLDOWN,HINT_REVEAL,TAP_SLOP,ROUTE,
     create,spawn,step,at,scriptInput,layout,items,clueSlots,hitTest,isFound,foundCount,nextMissing,hintRemaining,useHint,
-    tap,find,startLevel,levelUnlocked,collection,selectTrophy,interactTrophy,encodeSave,restoreSave,namedState,demoCheck,selfCheck,outOfPlay:()=>false};
+    tap,find,startLevel,levelUnlocked,room,roomUnlocked,collection,selectTrophy,interactTrophy,encodeSave,restoreSave,namedState,demoCheck,selfCheck,outOfPlay:()=>false};
   if(typeof module!=='undefined')module.exports=root.SIM;
 })(typeof window!=='undefined'?window:globalThis);

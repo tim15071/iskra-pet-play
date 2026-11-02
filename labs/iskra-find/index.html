@@ -6,7 +6,7 @@
 <meta name="theme-color" content="#fff7e0">
 <meta name="color-scheme" content="light">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='16' fill='%23fff7e0'/%3E%3Cpath d='M32 6 39 25 58 32 39 39 32 58 25 39 6 32 25 25Z' fill='%23f4b83f'/%3E%3C/svg%3E">
-<title>Мастерская находок — Искра</title>
+<title>Мир находок — Искра</title>
 <style>
 @font-face{font-family:Iskra;src:url("assets/game-font.ttf") format("truetype");font-weight:100 1000;font-display:swap}
 @font-face{font-family:Nunito;src:url("assets/game-font.ttf") format("truetype");font-weight:100 1000;font-display:swap}
@@ -34,11 +34,11 @@ button:focus-visible{outline:3px solid #14756f;outline-offset:5px}
 </style>
 </head>
 <body>
-<main id="stage" aria-label="Игра «Мастерская находок»">
-<canvas id="c" tabindex="0" role="application" aria-label="Мастерская Искры. Найди игрушки из списка внизу." aria-describedby="instructions" aria-busy="true">Для игры нужен браузер с поддержкой WebGL2.</canvas>
-<p id="instructions" class="sr-only">Найди в комнате игрушки с нижней панели. Коснись образца, чтобы выбрать предмет для подсказки. Все предметы видны на экране. Enter — подсказка, стрелки на клавиатуре — выбрать образец, F — полноэкранный режим, R — начать уровень заново, Escape — отменить касание.</p>
-<div id="loading" class="overlay" role="status" aria-live="polite"><div class="mark" aria-hidden="true">✦</div><h1>Открываем мастерскую</h1><p>Искра готовит игрушки…</p></div>
-<div id="error" class="overlay" role="alert" hidden><div class="mark" aria-hidden="true">!</div><h1>Мастерская пока не открылась</h1><p id="error-message">Попробуй открыть её ещё раз.</p><button id="retry" type="button">Попробовать ещё раз</button></div>
+<main id="stage" aria-label="Игра «Мир находок»">
+<canvas id="c" tabindex="0" role="application" aria-label="Мир Искры. Найди предметы из списка внизу." aria-describedby="instructions" aria-busy="true">Для игры нужен браузер с поддержкой WebGL2.</canvas>
+<p id="instructions" class="sr-only">Найди в комнате предметы с нижней панели. Коснись образца, чтобы выбрать предмет для подсказки. Все предметы видны на экране. Карта находок открывает комнаты и призы. Enter — подсказка, стрелки на клавиатуре — выбрать образец, F — полноэкранный режим, R — начать уровень заново, Escape — отменить касание или закрыть карту.</p>
+<div id="loading" class="overlay" role="status" aria-live="polite"><div class="mark" aria-hidden="true">✦</div><h1>Открываем мир Искры</h1><p>Искра готовит находки…</p></div>
+<div id="error" class="overlay" role="alert" hidden><div class="mark" aria-hidden="true">!</div><h1>Мир пока не открылся</h1><p id="error-message">Попробуй открыть его ещё раз.</p><button id="retry" type="button">Попробовать ещё раз</button></div>
 <div id="progress-status" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
 <div id="notice" role="status" aria-live="polite" hidden></div>
 <div id="dev" aria-hidden="true"></div>
@@ -46,7 +46,7 @@ button:focus-visible{outline:3px solid #14756f;outline-offset:5px}
 <script>window.__STATIC__ = 1;</script>
 <script>
 'use strict';
-const STATIC=!!window.__STATIC__,VERSION=STATIC?'campaign-2-webp':Date.now();
+const STATIC=!!window.__STATIC__,VERSION=STATIC?'campaign-3-garden':Date.now();
 const query=new URLSearchParams(location.search),renderMode=query.has('render')&&query.get('render')!=='0';
 addEventListener('keydown',(event)=>{if(event.key==='Tab')document.documentElement.classList.add('keyboard-nav');});
 addEventListener('pointerdown',()=>document.documentElement.classList.remove('keyboard-nav'),{passive:true});
@@ -92,7 +92,7 @@ function showError(error){
   failed=true;loading.hidden=true;errorPanel.hidden=false;canvas.setAttribute('aria-busy','false');
   document.getElementById('error-message').textContent=/WebGL2/i.test(error.message||'')
     ?'Браузеру нужна поддержка WebGL2. Попробуй открыть игру в другом браузере.'
-    :'Не получилось загрузить мастерскую. Проверь соединение и попробуй ещё раз.';
+    :'Не получилось загрузить мир. Проверь соединение и попробуй ещё раз.';
 }
 document.getElementById('retry').addEventListener('click',()=>{saveProgress();location.reload();});
 function loadScript(name){
@@ -162,7 +162,7 @@ function watchSources(){
   try{const raw=localStorage.getItem(SIM.SAVE_KEY);if(raw)play=SIM.restoreSave(raw,0);}catch(_){}
   SCENE.state=play;window.__play=play;
   saveProgress=()=>{try{const payload=SIM.encodeSave(play);if(payload!==savedPayload){localStorage.setItem(SIM.SAVE_KEY,payload);savedPayload=payload;}}catch(_){}};
-  const announce=()=>{statusLine.textContent='Уровень '+(play.level+1)+'. Найдено '+play.count+' из '+play.total+(play.mode==='win'?'. Все игрушки найдены!':'');};
+  const announce=()=>{statusLine.textContent=SIM.room(play).name+'. Поиск '+(play.level+1)+'. Найдено '+play.count+' из '+play.total+(play.mode==='win'?'. Все предметы найдены!':'');};
   const keys=Object.create(null),taps=[],pointer={x:play.x,y:play.y};
   let gesture=null,acc=0,last=performance.now(),fpsElapsed=0,fpsFrames=0,fps=60,resizeTimer=0;
   const toView=(event)=>{const r=canvas.getBoundingClientRect();return{x:(event.clientX-r.left)/r.width*view.W,y:(event.clientY-r.top)/r.height*view.H};};
