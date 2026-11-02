@@ -12,6 +12,7 @@
   const view = ()=>window.ISKRA_VIEW || SIM.VIEW;
   const state = ()=>S.state || SIM.at(0);
   S.toyFit=(face,maxW,maxH)=>{const r=SIM.FACES[face].rect,k=Math.min(maxW/r[2],maxH/r[3]);return{w:r[2]*k,h:r[3]*k};};
+  S.trophyFit=(face)=>S.toyFit(face,108,112);
   const UI_ALPHA = 1;
   const HINT_VEIL = `uniform vec2 u_at; uniform float u_r,u_a;
 void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a;o=vec4(vec3(.035,.12,.13)*a,a); }`;
@@ -99,6 +100,26 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
   S.trophy = (ST=state()) => {
     const p=S.guide(ST),size=118,x=p.box[0]+p.box[2]-72,y=p.y-84;
     return {x,y,w:size,h:size,hit:{x:x-66,y:y-66,w:132,h:142}};
+  };
+  S.careGeometry=(ST=state())=>{
+    const action=ST.careAction;if(!action||!ST.pet||ST.pet.clock>=action.until)return null;
+    const age=ST.pet.clock-action.started,duration=action.until-action.started,p=S.guide(ST),home=S.trophy(ST);
+    const rigState=Object.assign({},ST,{rigTarget:S.toScreen(ST.x,ST.y,ST)});
+    const joints=window.ISKRA_RIG&&window.ISKRA_RIG.joints(rigState,ST.t,p.x,p.y,p.scale);
+    if(!joints)return null;
+    const weight=smooth(Math.min(age/.22,(duration-age)/.3));
+    if(action.kind==='play'){
+      const mix=age<.8?smooth(age/.8):age<1.3?1:1-smooth((age-1.3)/.9),hand=joints.handR,icon=S.trophyFit(action.face),a=S.layout(ST);
+      const rot=.15*weight*Math.sin(age*5),halfW=(Math.abs(Math.cos(rot))*icon.w+Math.abs(Math.sin(rot))*icon.h)/2,halfH=(Math.abs(Math.sin(rot))*icon.w+Math.abs(Math.cos(rot))*icon.h)/2;
+      const x=home.x+(hand[0]-home.x)*mix,y=home.y-12+(hand[1]-icon.h*.55-10-home.y+12)*mix-Math.sin(mix*Math.PI)*40*p.scale;
+      return{kind:'play',age,weight,face:action.face,x:clamp(x,halfW+12,a.W-halfW-12),y:clamp(y,a.headerH+halfH+12,a.footerY-halfH-12),rot,w:icon.w,h:icon.h,size:112,joints};
+    }
+    if(action.kind==='feed'){
+      const q=smooth(age/1.05),from=[joints.handR[0]+38*p.scale,joints.handR[1]-26*p.scale],mouth=joints.beak;
+      return{kind:'feed',age,weight,face:7,x:from[0]+(mouth[0]-from[0])*q,y:from[1]+(mouth[1]-from[1])*q-Math.sin(q*Math.PI)*25*p.scale,
+        rot:-.12*(1-q),size:(70-42*q)*(1-smooth((age-1.35)/.65)),joints};
+    }
+    return{kind:'rest',age,weight,joints};
   };
   S.clues = (ST=state()) => {
     const a=S.layout(ST),target=SIM.layout(ST).targets,cols=a.portrait?(a.narrow?4:target.length>8?6:4):target.length;
@@ -193,6 +214,8 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
     L.sprite(SIM.room(ST).texture,a.originX,a.originY,{w:SIM.WORLD.W*k,h:SIM.WORLD.H*k});
     clipRoom(a,false);
     L.beginComp();clipRoom(a,true);
+    const care=S.careGeometry(ST);
+    if(care&&care.kind==='rest')L.solid(0,0,a.W,a.H,[.08,.17,.27],0,0,0,.13*care.weight);
     for(const p of S.itemPlacements(ST)) {
       const o=p.item;
       if(SIM.isFound(ST,o))continue;
@@ -236,12 +259,24 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
       L.shadow(p.x,p.y+62,66,11,.26);
       L.rrect(p.x-63,p.y+38,126,28,14,[.65,.38,.12],[.94,.70,.30]);
       L.rrect(p.x-63,p.y+31,126,18,12,[1,.88,.53],[1,.75,.29]);
-      const r=SIM.FACES[selected.face].rect,s=Math.min(108/r[2],112/r[3]);
-      toy(selected.face,p.x,p.y-12,r[2]*s,r[3]*s);
+      const icon=S.trophyFit(selected.face);
+      if(!care||care.kind!=='play')toy(selected.face,p.x,p.y-12,icon.w,icon.h);
       const label={x:p.x-72,y:p.y+57,w:144,h:42};
       L.rrect(label.x,label.y,label.w,label.h,14,C.cream,C.cream,.9);L.uiBox('trophy_label',label.x,label.y,label.w,label.h,4);
-      text('trophy_name','Мой приз',p.x,label.y+21,136,a.narrow?32:26);
+      const remaining=Math.ceil(SIM.careStatus(ST).actions.play.remaining);
+      text('trophy_name',care?care.kind==='play'?'Играем':care.kind==='feed'?'Угощаем':'Отдыхаем':remaining>0?'Ещё '+remaining+' с':'Мой приз',p.x,label.y+21,136,a.narrow?32:26);
       if(age<1)for(let i=0;i<7;i++){const q=age,ang=i*Math.PI*2/7;L.star(p.x+Math.cos(ang)*(32+q*60),p.y-12+Math.sin(ang)*(32+q*60),8*(1-q),[1,.93,.55],1-q);}
+    }
+    if(care){
+      const p=S.guide(ST);
+      if(care.kind==='play'||care.kind==='feed'){
+        if(care.size>0.2){const icon=care.kind==='play'?care:S.toyFit(care.face,care.size,care.size);toy(care.face,care.x,care.y,icon.w,icon.h,care.rot);}
+        if(care.kind==='feed'&&care.age>=1.05&&care.age<1.35)L.anchor('food_beak_contact',care.joints.beak,[care.x,care.y],1);
+        if(care.kind==='feed'&&care.age>1.1){const u=clamp((care.age-1.1)/1.1,0,1);for(let i=0;i<5;i++){const angle=i*Math.PI*.4;L.star(care.joints.beak[0]+Math.cos(angle)*(16+35*u)*p.scale,care.joints.beak[1]+Math.sin(angle)*(16+35*u)*p.scale,5*p.scale*(1-u),[1,.88,.42],(1-u)*.8);}}
+      }else{
+        const head=care.joints.head;L.glow(head[0],head[1]+50*p.scale,70*p.scale,[1,.79,.35],.06*care.weight,3);
+        for(let i=0;i<3;i++){const phase=(care.age*.7+i/3)%1;L.star(head[0]+(45+i*17)*p.scale,head[1]-(30+phase*45)*p.scale,(4+i)*p.scale,[1,.89,.57],Math.sin(phase*Math.PI)*.5*care.weight);}
+      }
     }
     clipRoom(a,false);
     // The supplied room already contains its finished light and colour grade.
@@ -250,7 +285,7 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
   }
   function drawHeader(ST,a) {
     panel('header_title',a.title,C.paper,false,12);
-    text('title','Карта находок  ›',32,a.portrait?43:37,a.title.w-32,a.portrait?35:37,{al:0});
+    text('title','Карта и забота  ›',32,a.portrait?43:37,a.title.w-32,a.portrait?35:37,{al:0});
     text('level_title',a.portrait?'Уровень '+(ST.level+1)+'  ·  Найдено '+ST.count+' / '+ST.total:'Уровень '+(ST.level+1)+'  ·  '+SIM.layout(ST).name,32,a.portrait?83:68,a.title.w-32,a.narrow?34:a.portrait?25:20,{al:0,col:'#35695f',weight:'800'});
     if(!a.portrait) {
       panel('count_panel',a.count,[.88,.94,.82],false,8);
@@ -319,8 +354,15 @@ void main(){ float d=length(v_px-u_at);float a=smoothstep(u_r*.8,u_r*1.85,d)*u_a
     const states=names.map((n)=>[n,SIM.namedState(n)]),base=SIM.namedState('play');
     if(SIM.TROPHIES){const placed=SIM.namedState('play');placed.progress.completed[0]=true;placed.progress.claimed[0]=true;SIM.selectTrophy(placed,SIM.TROPHIES[0].id);states.push(['trophy',placed]);}
     {const placed=SIM.namedState('garden');placed.progress.completed[6]=true;placed.progress.claimed[6]=true;SIM.selectTrophy(placed,SIM.TROPHIES[6].id);states.push(['gardenprize',placed]);}
+    const careState=(kind,age=1.15)=>{
+      const st=SIM.namedState('play');st.progress.completed[0]=true;st.progress.claimed[0]=true;SIM.selectTrophy(st,SIM.TROPHIES[0].id);SIM.syncDay(st,'2026-11-02');
+      st.dailyState.chestsTotal=1;SIM.care(st,kind);SIM.tickCare(st,age);return st;
+    };
+    for(const kind of ['play','rest','feed'])states.push(['care_'+kind,careState(kind)]);
+    states.push(['care_cooldown',careState('play',3)]);
     const loop=window.ISKRA_RIG?window.ISKRA_RIG.qaLoop(base):[];
-    return {states,cycles:{},loops:loop.length?{iskra_idle:loop}:{},subject:{iskra_idle:'iskra'},actors:loop.length?['iskra']:[],
+    const careLoops={};for(const kind of ['play','rest','feed']){const duration=SIM.CARE_DURATIONS[kind];careLoops['care_'+kind]=Array.from({length:24},(_,i)=>careState(kind,i*duration/24));}
+    return {states,cycles:{},loops:Object.assign(loop.length?{iskra_idle:loop}:{},careLoops),subject:{iskra_idle:'iskra',care_play:'iskra',care_rest:'iskra',care_feed:'iskra'},actors:loop.length?['iskra']:[],
       sprites:{iskra_idle:window.ISKRA_RIG?window.ISKRA_RIG.textures:[]},
       box:()=>S.guide().box};
   };

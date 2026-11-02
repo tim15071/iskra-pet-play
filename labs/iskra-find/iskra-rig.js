@@ -25,7 +25,7 @@
     anchors: {
       // Body/root points are model-relative. Other tips are local image pixels.
       footL: [-39, 0], footR: [39, 0], hip: [0, -78],
-      headCentre: [100, 76], headTop: [100, 6],
+      headCentre: [100, 76], headTop: [100, 6], beak: [100,112],
       wingTipL: [12, 143], wingTipR: [83, 143], tailTip: [40, 107]
     }
   };
@@ -111,15 +111,20 @@
     const waveL = celebrate * (0.29 + 0.16 * Math.sin(beatAge * 16 - 0.8));
     const waveR = pulse(findAge - 0.09, 1.06) * (0.24 + 0.16 * Math.sin((beatAge - 0.09) * 16 - 0.8));
     const inspect = pulse(clueAge, 1.7);
+    const action=S.careAction,careAge=action&&S.pet?S.pet.clock-action.started:-1;
+    const active=action&&careAge>=0&&S.pet.clock<action.until;
+    const careWeight=active?smooth(Math.min(careAge/.22,(action.until-S.pet.clock)/.28)):0;
+    const resting=active&&action.kind==='rest',feeding=active&&action.kind==='feed',playing=active&&action.kind==='play';
     return {
       head: 0.075 * gazeX - 0.035 * gazeY + 0.040 * Math.sin(world * TAU / 6.8 + 0.5)
-        + 0.16 * inspect + 0.16 * curious - 0.12 * joy - 0.07 * finale,
+        + 0.16 * inspect + 0.16 * curious - 0.12 * joy - 0.07 * finale
+        + careWeight*(resting?.14:feeding?.035*Math.sin(careAge*15):playing?-.09*Math.sin(careAge*5):0),
       headX: 1 - 0.025 * Math.abs(gazeX),
-      wingL: idleL + 0.40 * joy + waveL + 0.035 * curious + 0.18 * finale,
-      wingR: idleR - 0.29 * joy - waveR - 0.10 * inspect - 0.22 * finale,
+      wingL: idleL + 0.40 * joy + waveL + 0.035 * curious + 0.18 * finale + careWeight*(resting?-.16:feeding?.13:playing?.22*Math.sin(careAge*6):0),
+      wingR: idleR - 0.29 * joy - waveR - 0.10 * inspect - 0.22 * finale + careWeight*(resting?.14:feeding?-.16:playing?-.18*Math.sin(careAge*6+.3):0),
       tail: 0.11 * Math.sin(world * TAU / 4.1 + 1.3) + 0.28 * joy
         + 0.15 * celebrate * Math.sin(Math.max(0, beatAge - 0.13) * 12),
-      blink: isBlinking(world, false), joy, curious
+      blink: resting&&careAge>.22&&action.until-S.pet.clock>.25 || isBlinking(world, false), joy, curious
     };
   }
 
@@ -142,7 +147,7 @@
       ground: [x, y], groundL: bodyPoint(A.footL), groundR: bodyPoint(A.footR),
       heelL: bodyPoint(A.footL), heelR: bodyPoint(A.footR),
       hip: bodyPoint(A.hip), neck: bodyPoint(P.head.at),
-      head: onPart('head', A.headCentre), top: onPart('head', A.headTop),
+      head: onPart('head', A.headCentre), top: onPart('head', A.headTop), beak: onPart('head', A.beak),
       shL: bodyPoint(P.wingL.at), shR: bodyPoint(P.wingR.at),
       handL: onPart('wingL', A.wingTipL), handR: onPart('wingR', A.wingTipR),
       tailBase: bodyPoint(P.tail.at), tailTip: onPart('tail', A.tailTip)

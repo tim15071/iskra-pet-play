@@ -4,8 +4,15 @@
   'use strict';
   const DT = 1 / 120, L = 25, VIEW = { W: 1920, H: 1080 }, WORLD = { W: 1920, H: 1440 };
   // Keep the original storage key: each schema extends the same local journey.
-  const SAVE_KEY = 'iskra-ref2game-find-v1', VERSION = 3;
+  const SAVE_KEY = 'iskra-ref2game-find-v1', VERSION = 4;
   const HINT_COOLDOWN = 8, HINT_REVEAL = 3.2, TAP_SLOP = 22;
+  const FRIEND_THRESHOLDS = [0,60,180], CARE_COOLDOWN = 10;
+  const CARE_DURATIONS = {play:2.2,rest:3,feed:2.4};
+  const DAILY_TASKS = [
+    {id:'find8',label:'Найди 8 предметов',target:8},
+    {id:'play1',label:'Поиграй с Искрой',target:1},
+    {id:'rest1',label:'Отдохни с Искрой',target:1}
+  ];
   const FACE_IDS = ['rocket', 'duck', 'dinosaur', 'star', 'airplane', 'candy', 'top', 'strawberry', 'ball', 'shell', 'crown', 'gamepad',
     'wateringcan','flowerpot','butterfly','ladybug','mushroom','sunflower','acorn','pear','leaf','seedbag','lantern','pinwheel'];
   const FACE_NAMES = ['Ракета', 'Уточка', 'Динозаврик', 'Звёздочка', 'Самолётик', 'Конфета', 'Юла', 'Клубника', 'Мяч', 'Ракушка', 'Корона', 'Геймпад',
@@ -117,6 +124,79 @@
   const has = (o,k) => Object.prototype.hasOwnProperty.call(o,k);
   const isFound = (S,item) => has(S.found, typeof item === 'string' ? item : item.id);
   const foundCount = (S) => items(S).filter((o) => o.target && isFound(S,o)).length;
+  const bounded = (value,lo,hi,fallback=lo) => typeof value==='number'&&Number.isFinite(value)?clamp(value,lo,hi):fallback;
+  const integer = (value,lo,hi,fallback=lo) => Number.isInteger(value)?clamp(value,lo,hi):fallback;
+  const newPet = () => ({xp:0,food:70,fun:65,rest:65,clock:0,readyAt:{play:0,rest:0,feed:0}});
+  const newDaily = (day='',chestsTotal=0) => ({day,maxDay:day,counts:{find8:0,play1:0,rest1:0},claimed:{find8:false,play1:false,rest1:false},chestClaimed:false,chestsTotal});
+  function validDay(value) {
+    if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return false;
+    const [y,m,d]=value.split('-').map(Number),leap=y%4===0&&(y%100!==0||y%400===0);
+    return y>=2000&&m>=1&&m<=12&&d>=1&&d<=[31,leap?29:28,31,30,31,30,31,31,30,31,30,31][m-1];
+  }
+  function cleanDaily(data) {
+    if(!data||typeof data!=='object'||Array.isArray(data))return newDaily();
+    const sourceDay=validDay(data.day)?data.day:'',high=validDay(data.maxDay)?data.maxDay:sourceDay,day=sourceDay>high?sourceDay:high;
+    const D=newDaily(day,integer(data.chestsTotal,0,99999));
+    if(sourceDay&&sourceDay===day)for(const task of DAILY_TASKS){
+      D.counts[task.id]=integer(data.counts&&data.counts[task.id],0,task.target);
+      D.claimed[task.id]=D.counts[task.id]===task.target&&!!data.claimed&&data.claimed[task.id]===true;
+    }
+    D.chestClaimed=!!day&&DAILY_TASKS.every(task=>D.claimed[task.id])&&data.chestClaimed===true;
+    if(D.chestClaimed)D.chestsTotal=Math.max(1,D.chestsTotal);
+    return D;
+  }
+  function friendship(S) {
+    const xp=S.pet.xp,level=xp>=FRIEND_THRESHOLDS[2]?3:xp>=FRIEND_THRESHOLDS[1]?2:1,nextAt=FRIEND_THRESHOLDS[level]??null;
+    return {level,xp,nextAt,progress:nextAt===null?1:clamp((xp-FRIEND_THRESHOLDS[level-1])/(nextAt-FRIEND_THRESHOLDS[level-1]),0,1),cooldown:level>=2?6:HINT_COOLDOWN,reveal:level>=3?5:HINT_REVEAL};
+  }
+  const gainXP = (S,value) => {S.pet.xp=clamp(S.pet.xp+value,0,1000000);};
+  function daily(S) {
+    const D=S.dailyState,tasks=DAILY_TASKS.map(task=>Object.assign({},task,{count:D.counts[task.id],claimed:D.claimed[task.id],ready:!!D.day&&D.counts[task.id]>=task.target&&!D.claimed[task.id]}));
+    return {day:D.day,tasks,chestReady:!!D.day&&!D.chestClaimed&&tasks.every(task=>task.claimed),chestClaimed:D.chestClaimed,chestsTotal:D.chestsTotal};
+  }
+  function syncDay(S,day) {
+    if(!validDay(day)||day<=S.dailyState.maxDay)return false;
+    S.dailyState=newDaily(day,S.dailyState.chestsTotal);S.revision++;return true;
+  }
+  function countDaily(S,id) {
+    if(!S.dailyState.day)return;
+    const task=DAILY_TASKS.find(task=>task.id===id);if(task)S.dailyState.counts[id]=Math.min(task.target,S.dailyState.counts[id]+1);
+  }
+  function claimDaily(S,id) {
+    const task=daily(S).tasks.find(task=>task.id===id);if(!task||!task.ready)return false;
+    S.dailyState.claimed[id]=true;gainXP(S,5);S.revision++;event(S,'daily',{id,xp:5});return true;
+  }
+  function claimDailyChest(S) {
+    if(!daily(S).chestReady)return false;
+    S.dailyState.chestClaimed=true;S.dailyState.chestsTotal=Math.min(99999,S.dailyState.chestsTotal+1);gainXP(S,15);S.revision++;
+    event(S,'dailychest',{first:S.dailyState.chestsTotal===1,xp:15});return true;
+  }
+  function tickCare(S,dt) {
+    if(typeof dt!=='number'||!Number.isFinite(dt)||dt<=0)return S;
+    S.pet.clock=Math.min(1e12,S.pet.clock+Math.min(dt,86400));
+    if(S.careAction&&S.pet.clock>=S.careAction.until){S.careAction=null;S.revision++;}
+    return S;
+  }
+  function careStatus(S) {
+    const active=S.careAction&&S.pet.clock<S.careAction.until?clone(S.careAction):null,actions={};
+    const toy=collection(S).find(o=>o.selected&&o.unlocked),foodUnlocked=S.dailyState.chestsTotal>0;
+    for(const kind of Object.keys(CARE_DURATIONS)){
+      const remaining=Math.max(0,S.pet.readyAt[kind]-S.pet.clock),reason=S.mode!=='play'?'win':active?'busy':kind==='play'&&!toy?'toy':kind==='feed'&&!foodUnlocked?'food':remaining>0?'cooldown':'';
+      actions[kind]={available:!reason,remaining,reason};
+    }
+    return {needs:{food:S.pet.food,fun:S.pet.fun,rest:S.pet.rest},active,actions,foodUnlocked};
+  }
+  function care(S,kind) {
+    if(typeof kind!=='string'||!has(CARE_DURATIONS,kind))return false;
+    const status=careStatus(S);if(!status.actions[kind].available)return false;
+    const toy=kind==='play'?collection(S).find(o=>o.selected&&o.unlocked):null,face=toy?toy.face:kind==='feed'?7:22,duration=CARE_DURATIONS[kind];
+    S.careAction={kind,started:S.pet.clock,until:S.pet.clock+duration,face};S.pet.readyAt[kind]=S.pet.clock+CARE_COOLDOWN;
+    const need=kind==='play'?'fun':kind==='rest'?'rest':'food';S.pet[need]=Math.min(100,S.pet[need]+18);gainXP(S,2);
+    if(kind==='play')countDaily(S,'play1');if(kind==='rest')countDaily(S,'rest1');
+    S.reaction.joyV+=kind==='rest'?2:6;S.revision++;event(S,'care',{kind,face,id:toy?toy.id:kind,duration});
+    if(kind==='play')event(S,'trophy',{id:toy.id,face:toy.face});
+    return true;
+  }
   const levelUnlocked = (S,n) => Number.isInteger(n)&&n>=0&&n<LEVELS.length&&(n<3||S.progress.completed[n-1]===true);
   const roomUnlocked = (S,id) => {const target=ROOMS.find((o)=>o.id===id);return !!target&&levelUnlocked(S,target.start);};
   const collection = (S) => TROPHIES.map((o)=>Object.assign({},o,{unlocked:S.progress.claimed[o.level-1]===true,selected:S.progress.selected===o.id}));
@@ -126,10 +206,7 @@
     S.progress.selected=id;S.revision++;event(S,'decoration',{id});return true;
   }
   function interactTrophy(S) {
-    if(S.mode!=='play')return false;
-    const trophy=collection(S).find((o)=>o.selected&&o.unlocked);
-    if(!trophy)return false;
-    S.reaction.joyV+=6;event(S,'trophy',{id:trophy.id,face:trophy.face});return true;
+    return care(S,'play');
   }
   function award(S) {
     const trophy=TROPHIES[S.level],first=S.progress.claimed[S.level]!==true;
@@ -178,14 +255,14 @@
     return { schema: VERSION, t: 0, steps: 0, wt0: 0, level: n, mode: 'play', found: {}, count: 0, total: def.targets.length,
       focus: def.targets[0], hint: { id: '', until: -1, readyAt: 0 }, hintUses: 0, ev: [],
       x: VIEW.W/2, y: VIEW.H/2, press: 0, pointer: null, hoverId: '', hov: Object.fromEntries(def.items.map((o)=>[o.id,[0,0]])),
-      progress: { completed: LEVELS.map(()=>false),claimed:LEVELS.map(()=>false),selected:null,attempts:{} },reward:null,revision: 0, wonAt: -1, lastFound: '', lastMiss: '',
+      progress: { completed: LEVELS.map(()=>false),claimed:LEVELS.map(()=>false),selected:null,attempts:{} },pet:newPet(),dailyState:newDaily(),careAction:null,reward:null,revision: 0, wonAt: -1, lastFound: '', lastMiss: '',
       gestureBlocked: false, controls: { act: false, left: false, right: false, jump: false },
       reaction: { joy: 0, joyV: 0, curious: 0, curiousV: 0 } };
   }
   function spawn(worldT=0) { const S = create(); S.wt0 = Number.isFinite(worldT) ? worldT : 0; return S; }
   function startLevel(S,number,replay=false) {
     if(!levelUnlocked(S,number))return false;
-    const previous = S.level, n = number, keep = { t:S.t,steps:S.steps,wt0:S.wt0,progress:clone(S.progress),revision:S.revision+1,controls:S.controls };
+    const previous = S.level, n = number, keep = { t:S.t,steps:S.steps,wt0:S.wt0,progress:clone(S.progress),pet:clone(S.pet),dailyState:clone(S.dailyState),careAction:clone(S.careAction),revision:S.revision+1,controls:S.controls };
     keep.progress.attempts=replay?clone(S.progress.attempts):savedAttempts(S);
     if(replay||keep.progress.completed[n])delete keep.progress.attempts[n];
     const resume=!replay&&!keep.progress.completed[n]?keep.progress.attempts[n]:null;
@@ -210,13 +287,17 @@
   function useHint(S) {
     if (S.mode!=='play' || hintRemaining(S)>0) return false;
     const o=nextMissing(S); if (!o) return false;
-    S.focus=o.face; S.hint={id:o.id,until:S.t+HINT_REVEAL,readyAt:S.t+HINT_COOLDOWN}; S.hintUses++; S.revision++;
+    const perks=friendship(S);
+    S.focus=o.face; S.hint={id:o.id,until:S.t+perks.reveal,readyAt:S.t+perks.cooldown}; S.hintUses++; S.revision++;
     S.reaction.curiousV+=4;
     event(S,'hint',{id:o.id,face:o.face,x:o.x,y:o.y}); return true;
   }
   function find(S,o) {
     if (S.mode!=='play' || !o || !o.target || isFound(S,o)) return false;
-    S.found[o.id]=S.t; S.count=foundCount(S); S.lastFound=o.id; S.revision++; S.reaction.joyV+=7;
+    S.found[o.id]=S.t; S.count=foundCount(S); S.lastFound=o.id; S.revision++; S.reaction.joyV+=7;gainXP(S,1);countDaily(S,'find8');
+    // Only confirmed active play uses a little food/rest; returning after days
+    // never changes needs, and low needs never block the search or hurt Iskra.
+    S.pet.food=Math.max(20,S.pet.food-.3);S.pet.rest=Math.max(20,S.pet.rest-.4);S.pet.fun=Math.min(100,S.pet.fun+.15);
     event(S,'find',{id:o.id,face:o.face,x:o.x,y:o.y,count:S.count});
     if (S.hint.id===o.id) { S.hint.id=''; S.hint.until=-1; }
     const next=nextMissing(S); if(next)S.focus=next.face;
@@ -251,7 +332,7 @@
     return false;
   }
   function step(S,inp={}) {
-    S.steps++; S.t=S.steps*DT;
+    S.steps++; S.t=S.steps*DT;tickCare(S,DT);
     if(Number.isFinite(inp.px)) S.x=inp.px;
     if(Number.isFinite(inp.py)) S.y=inp.py;
     const down=!!inp.press;
@@ -296,12 +377,13 @@
   // Local workshop collection only; the main Godot profile is separate.
   function encodeSave(S) {
     return JSON.stringify({version:VERSION,level:S.level,found:Object.keys(S.found),completed:S.progress.completed,claimed:S.progress.claimed,selected:S.progress.selected,attempts:savedAttempts(S),
-      hintRemaining:hintRemaining(S),hintUses:S.hintUses});
+      hintRemaining:hintRemaining(S),hintUses:S.hintUses,pet:{xp:S.pet.xp,food:S.pet.food,fun:S.pet.fun,rest:S.pet.rest,
+        cooldowns:Object.fromEntries(Object.keys(CARE_DURATIONS).map(kind=>[kind,Math.max(0,S.pet.readyAt[kind]-S.pet.clock)]))},daily:cleanDaily(S.dailyState)});
   }
   function restoreSave(raw,worldT=0) {
     let data;
     try { data=typeof raw==='string'?JSON.parse(raw):raw; } catch (_) {return spawn(worldT);}
-    if(!data || typeof data!=='object' || ![1,2,VERSION].includes(data.version))return spawn(worldT);
+    if(!data || typeof data!=='object' || ![1,2,3,VERSION].includes(data.version))return spawn(worldT);
     const oldLimit=data.version===1?3:data.version===2?6:LEVELS.length;
     if(!Number.isInteger(data.level)||data.level<0||data.level>=oldLimit)return spawn(worldT);
     const completed=LEVELS.map((_,i)=>i<oldLimit&&Array.isArray(data.completed)&&data.completed[i]===true);
@@ -320,6 +402,14 @@
     const valid=new Set(items(S).filter((o)=>o.target).map((o)=>o.id));
     for(const id of number===data.level&&Array.isArray(data.found)?data.found:[]) if(typeof id==='string'&&valid.has(id))S.found[id]=-1;
     S.count=foundCount(S);
+    const pet=data.version===VERSION&&data.pet&&typeof data.pet==='object'&&!Array.isArray(data.pet)?data.pet:null;
+    if(pet){
+      S.pet.xp=integer(pet.xp,0,1000000);for(const need of ['food','fun','rest'])S.pet[need]=bounded(pet[need],0,100,newPet()[need]);
+      for(const kind of Object.keys(CARE_DURATIONS))S.pet.readyAt[kind]=bounded(pet.cooldowns&&pet.cooldowns[kind],0,CARE_COOLDOWN);
+    }else if(data.version<VERSION){
+      S.pet.xp=completed.reduce((sum,done,i)=>sum+(done?LEVELS[i].targets.length:0),0)+(completed[number]?0:S.count);
+    }
+    if(data.version===VERSION)S.dailyState=cleanDaily(data.daily);
     if(S.count===S.total) {S.mode='win';S.wonAt=-1;award(S);S.reward.first=false;}
     S.progress.selected=typeof data.selected==='string'&&TROPHIES.some((o)=>o.id===data.selected&&S.progress.claimed[o.level-1])?data.selected:null;
     const next=nextMissing(S); if(next)S.focus=next.face;
@@ -391,8 +481,8 @@
     return failures;
   }
   root.SIM={DT,L,VIEW,WORLD,SOURCE,ALPHA,HINT:'Найди в комнате предметы с нижней панели. Образец выбирает предмет для подсказки. Enter — подсказка, F — во весь экран, R — начать заново.',
-    SAVE_KEY,VERSION,FACES,FACE_IDS,FACE_NAMES,RECTS,LEVELS,TROPHIES,ROOMS,UI,HINT_COOLDOWN,HINT_REVEAL,TAP_SLOP,ROUTE,
+    SAVE_KEY,VERSION,FACES,FACE_IDS,FACE_NAMES,RECTS,LEVELS,TROPHIES,ROOMS,UI,HINT_COOLDOWN,HINT_REVEAL,TAP_SLOP,ROUTE,FRIEND_THRESHOLDS,CARE_COOLDOWN,CARE_DURATIONS,DAILY_TASKS,
     create,spawn,step,at,scriptInput,layout,items,clueSlots,hitTest,isFound,foundCount,nextMissing,hintRemaining,useHint,
-    tap,find,startLevel,levelUnlocked,room,roomUnlocked,collection,selectTrophy,interactTrophy,encodeSave,restoreSave,namedState,demoCheck,selfCheck,outOfPlay:()=>false};
+    tap,find,startLevel,levelUnlocked,room,roomUnlocked,collection,selectTrophy,interactTrophy,friendship,daily,syncDay,claimDaily,claimDailyChest,careStatus,care,tickCare,encodeSave,restoreSave,namedState,demoCheck,selfCheck,outOfPlay:()=>false};
   if(typeof module!=='undefined')module.exports=root.SIM;
 })(typeof window!=='undefined'?window:globalThis);

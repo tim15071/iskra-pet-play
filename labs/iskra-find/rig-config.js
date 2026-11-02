@@ -5,7 +5,7 @@
   const raw = {
     iskra_body: [420, 482], iskra_head: [408, 528],
     iskra_wing_l: [405, 414], iskra_wing_r: [430, 436],
-    iskra_tail: [431, 434], iskra_blink: [408, 528]
+    iskra_tail: [431, 434], iskra_blink: [408, 528], iskra_rest_head: [408, 528]
   };
   function measurement(name, artScale) {
     const a = (window.ASSETS || {})[name] || {}, crop = a.crop || [0, 0, ...raw[name]],
@@ -30,17 +30,15 @@
       wingL: part('iskra_wing_r', .30, [352, 48], [-61, -207], -.58),
       wingR: part('iskra_wing_l', .34, [80, 42], [61, -207], .58),
       tail: part('iskra_tail', .29, [355, 39], [-30, -119], .23),
-      // The generated closed-eye drawing changes the crest and its lighting.
-      // Keep the extracted asset for inspection, but use the registered open head
-      // for both states so an automated blink cannot flash a different silhouette.
-      blink: part('iskra_head', .36, [249, 480], [0, -215])
+      // Only measured eye regions differ; outline, crest and beak are identical.
+      blink: part('iskra_rest_head', .36, [249, 480], [0, -215])
     },
     anchors: {
       footL: [-54, 0], footR: [52, 0], hip: [0, -62],
-      headCentre: head.point([234, 325]), headTop: head.point([156, 8]),
+      headCentre: head.point([234, 325]), headTop: head.point([156, 8]), beak: head.point([248, 374]),
       wingTipL: left.point([20, 418]), wingTipR: right.point([384, 391]),
       tailTip: tail.point([18, 384])
     }
   });
-  window.ISKRA_RIG_BLINK_ENABLED = false;
+  window.ISKRA_RIG_BLINK_ENABLED = true;
 })();

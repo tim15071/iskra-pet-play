@@ -46,7 +46,7 @@ button:focus-visible{outline:3px solid #14756f;outline-offset:5px}
 <script>window.__STATIC__ = 1;</script>
 <script>
 'use strict';
-const STATIC=!!window.__STATIC__,VERSION=STATIC?'campaign-3-garden':Date.now();
+const STATIC=!!window.__STATIC__,VERSION=STATIC?'campaign-4-care':Date.now();
 const query=new URLSearchParams(location.search),renderMode=query.has('render')&&query.get('render')!=='0';
 addEventListener('keydown',(event)=>{if(event.key==='Tab')document.documentElement.classList.add('keyboard-nav');});
 addEventListener('pointerdown',()=>document.documentElement.classList.remove('keyboard-nav'),{passive:true});
@@ -160,6 +160,8 @@ function watchSources(){
   if(renderMode){SCENE.state=null;SCENE.render(0);window.__ready=true;loading.hidden=true;canvas.setAttribute('aria-busy','false');return;}
   let play=SIM.spawn(0),savedPayload='',savedRevision=-1,lastHint='';
   try{const raw=localStorage.getItem(SIM.SAVE_KEY);if(raw)play=SIM.restoreSave(raw,0);}catch(_){}
+  const localDay=()=>{const d=new Date();return[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');};
+  let currentDay=localDay();SIM.syncDay(play,currentDay);
   SCENE.state=play;window.__play=play;
   saveProgress=()=>{try{const payload=SIM.encodeSave(play);if(payload!==savedPayload){localStorage.setItem(SIM.SAVE_KEY,payload);savedPayload=payload;}}catch(_){}};
   const announce=()=>{statusLine.textContent=SIM.room(play).name+'. Поиск '+(play.level+1)+'. Найдено '+play.count+' из '+play.total+(play.mode==='win'?'. Все предметы найдены!':'');};
@@ -196,7 +198,13 @@ function watchSources(){
     updateGesture(event);const finished=gesture;gesture=null;releaseCapture(event.pointerId);
     if(finished.dragged)return;
     const{mapped}=mappedPointer(event);rememberPointer(mapped);
-    if(mapped.trophy){SIM.interactTrophy(play);return;}
+    if(mapped.trophy){
+      if(!SIM.interactTrophy(play)){
+        const status=SIM.careStatus(play),remaining=Math.ceil(status.actions.play.remaining);
+        showNotice(status.active?'Искра ещё занята. Подожди немного.':remaining>0?'Поиграем снова через '+remaining+' с.':'Выбери игрушку в разделе «Призы».');
+      }
+      return;
+    }
     if(mapped.fullscreen){window.toggleGameFullscreen();return;}
     if(mapped.pan){setCamera(SCENE.layout().camera+mapped.pan*400);return;}
     if(!mapped.blocked&&Number.isFinite(mapped.px)&&Number.isFinite(mapped.py))taps.push({x:mapped.px,y:mapped.py,room:!!mapped.room});
@@ -256,7 +264,8 @@ function watchSources(){
     try{
     const wall=Math.max(0,Math.min(.1,(now-last)/1000));last=now;
     fpsElapsed+=wall;fpsFrames++;if(fpsElapsed>.5){fps=fpsFrames/fpsElapsed;fpsElapsed=0;fpsFrames=0;window.__fps=fps;}
-    if(!document.hidden&&!journey.isOpen())acc+=wall;
+    if(!document.hidden){if(journey.isOpen())SIM.tickCare(play,wall);else acc+=wall;}
+    const day=localDay();if(day!==currentDay){currentDay=day;SIM.syncDay(play,day);}
     while(acc>=SIM.DT){
       const tap=taps.shift(),input={left:keys.ArrowLeft||keys.KeyA,right:keys.ArrowRight||keys.KeyD,up:keys.ArrowUp||keys.KeyW,down:keys.ArrowDown||keys.KeyS,
         act:keys.Enter||keys.KeyX||keys.KeyJ,jump:keys.Space,px:tap?tap.x:pointer.x,py:tap?tap.y:pointer.y,room:tap?!!tap.room:!!pointer.room,press:false,tap:!!tap};
